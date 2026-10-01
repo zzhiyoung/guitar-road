@@ -46,6 +46,9 @@ export const PDF_EXTENSIONS = [".pdf"] as const;
 
 export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 
+/** SPEC §2.3：Album 标题最大长度。放在 domain 层，便于客户端表单复用。 */
+export const ALBUM_TITLE_MAX = 100;
+
 export type ScoreFileKind = "gp" | "musicxml" | "pdf";
 
 export function detectFileKind(fileName: string): ScoreFileKind | null {

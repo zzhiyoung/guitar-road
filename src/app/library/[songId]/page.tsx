@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AlbumSelector } from "@/components/library/album-selector";
 import {
   BlockEditForm,
   BlockRowActions,
@@ -15,7 +16,7 @@ import { Card, Chip, SectionTitle, StatusBadge } from "@/components/ui";
 import { DIFFICULTY_LABELS, FEELING_META } from "@/lib/domain/constants";
 import { formatDuration } from "@/lib/domain/date";
 import { statusProgress } from "@/lib/domain/song-status";
-import { getCurrentUserId } from "@/lib/repositories";
+import { albumsRepo, getCurrentUserId } from "@/lib/repositories";
 import * as blocksRepo from "@/lib/repositories/blocks";
 import * as notesRepo from "@/lib/repositories/notes";
 import * as scoreFilesRepo from "@/lib/repositories/score-files";
@@ -38,10 +39,11 @@ export default async function SongDetailPage({
   const song = await songsRepo.getSong(userId, songId);
   if (!song) notFound();
 
-  const [blocks, scoreFiles, songNotes] = await Promise.all([
+  const [blocks, scoreFiles, songNotes, albums] = await Promise.all([
     blocksRepo.listBlocksBySong(song.id),
     scoreFilesRepo.listScoreFiles(song.id),
     notesRepo.listNotes("song", song.id),
+    albumsRepo.listAlbums(userId),
   ]);
 
   const storage = getStorage();
@@ -104,6 +106,14 @@ export default async function SongDetailPage({
           + 新建 练习段落
         </Link>
       </div>
+
+      <Card className="card-pad">
+        <AlbumSelector
+          songId={song.id}
+          albums={albums.map((a) => ({ id: a.id, title: a.title }))}
+          currentAlbumId={song.albumId}
+        />
+      </Card>
 
       <Card className="card-pad">
         <StatusChanger songId={song.id} current={song.status} />

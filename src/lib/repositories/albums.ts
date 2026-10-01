@@ -3,11 +3,9 @@ import { and, asc, eq, sql } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
 import { albums, songs } from "@/lib/db/schema";
+import { ALBUM_TITLE_MAX } from "@/lib/domain/constants";
 
 export type Album = typeof albums.$inferSelect;
-
-/** SPEC §2.3：title 最大长度 */
-export const ALBUM_TITLE_MAX = 100;
 
 export interface AlbumSongCount {
   /** null 表示「未分类」 */
