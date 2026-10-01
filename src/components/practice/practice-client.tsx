@@ -10,28 +10,17 @@ import {
   useRef,
   useState,
 } from "react";
-import type * as alphaTabNS from "@coderline/alphatab";
 
 import { completeSessionAction } from "@/app/actions/sessions";
 import { Icon } from "@/components/studio";
 import { SessionDialog } from "@/components/practice/session-dialog";
+import {
+  ScorePlayer,
+  type ScorePlayerHandle,
+  type ScorePlayerPosition,
+} from "@/components/player/score-player";
 import { Metronome } from "@/lib/audio/metronome";
-import {
-  alphaTabAssets,
-  loadAlphaTab,
-  practiceNotationSettings,
-} from "@/lib/alphatab/loader";
-import {
-  applyStaveView,
-  barRangeToTicks,
-  barTimings,
-  locateTick,
-  STAVE_VIEW_LABEL,
-  summarizeScore,
-  type BarTiming,
-  type ScoreSummary,
-  type StaveView,
-} from "@/lib/alphatab/score-utils";
+import type { BarTiming } from "@/lib/alphatab/score-utils";
 import {
   BPM_MAX,
   BPM_MIN,
@@ -104,16 +93,15 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   const router = useRouter();
   const { block, song, scoreFile } = data;
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const apiRef = useRef<alphaTabNS.AlphaTabApi | null>(null);
+  const playerRef = useRef<ScorePlayerHandle>(null);
   const timingsRef = useRef<BarTiming[]>([]);
   const rangeRef = useRef<{ startTick: number; endTick: number } | null>(null);
   const lastBeatKeyRef = useRef<number>(-1);
-  const prevTickRef = useRef<number>(-1);
   const metroRef = useRef<Metronome | null>(null);
   const metroOnRef = useRef(false);
   const bpmRef = useRef(block.currentBpm);
+  const playbackStartTickRef = useRef(0);
+  const playbackStartingRef = useRef(false);
   const trainerRef = useRef<TrainerState>({
     active: false,
     config: block.speedTrainingConfig ?? {
@@ -125,16 +113,10 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     completedInStep: 0,
   });
 
-  const [phase, setPhase] = useState<"loading" | "ready" | "error">(
-    scoreFile ? "loading" : "ready",
-  );
-  const [phaseMessage, setPhaseMessage] = useState<string>("");
-  const [summary, setSummary] = useState<ScoreSummary | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [scoreReady, setScoreReady] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [playbackStarting, setPlaybackStarting] = useState(false);
-  const playbackStartingRef = useRef(false);
-  const playbackStartTickRef = useRef(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [bpm, setBpm] = useState(block.currentBpm);
   const [scoreTempo, setScoreTempo] = useState<number>(0);
   const [loopEnabled, setLoopEnabled] = useState(block.defaultLoop);
@@ -148,10 +130,6 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   const [trainer, setTrainer] = useState<TrainerState>(trainerRef.current);
   const [sessionOpen, setSessionOpen] = useState(false);
   const [showPdf, setShowPdf] = useState(false);
-  const [staveView, setStaveView] = useState<StaveView>("scoreTab");
-  const staveViewRef = useRef<StaveView>("scoreTab");
-  const appliedViewRef = useRef<StaveView | null>(null);
-  const activeTrackRef = useRef<number>(scoreFile?.trackIndex ?? 0);
 
   const [formState, formAction, formPending] = useActionState<FormState, FormData>(
     completeSessionAction,
@@ -176,223 +154,6 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     }, 1000);
     return () => window.clearInterval(timer);
   }, []);
-
-  // ---------------------------------------------------------------------
-  // alphaTab 初始化（P-2）
-  // ---------------------------------------------------------------------
-  useEffect(() => {
-    if (!scoreFile) return;
-    let disposed = false;
-    let api: alphaTabNS.AlphaTabApi | null = null;
-
-    (async () => {
-      try {
-        const alphaTab = await loadAlphaTab();
-        if (disposed || !containerRef.current) return;
-
-        const scrollEl = scrollRef.current ?? undefined;
-        const assets = alphaTabAssets();
-        api = new alphaTab.AlphaTabApi(containerRef.current, {
-          core: {
-            scriptFile: assets.script,
-            fontDirectory: assets.fontDirectory,
-          },
-          display: {
-            layoutMode: alphaTab.LayoutMode.Page,
-            staveProfile: alphaTab.StaveProfile.ScoreTab,
-          },
-          // 曲目/艺术家等信息已由页面头承担，乐谱区只保留谱面本身
-          notation: practiceNotationSettings(alphaTab),
-          player: {
-            enablePlayer: true,
-            soundFont: assets.soundFont,
-            scrollElement: scrollEl,
-            scrollMode: alphaTab.ScrollMode.Continuous,
-            enableCursor: true,
-            enableAnimatedBeatCursor: true,
-          },
-        });
-        apiRef.current = api;
-        api.playerReady.on(() => { if (!disposed) setPlayerReady(true); });
-
-        api.error.on((err) => {
-          setPlayerReady(false);
-          playbackStartingRef.current = false;
-          setPlaybackStarting(false);
-          setPhase("error");
-          setPhaseMessage(
-            err instanceof Error ? err.message : String(err ?? "乐谱解析失败"),
-          );
-        });
-
-        api.scoreLoaded.on((score) => {
-          if (disposed) return;
-          const timings = barTimings(score);
-          timingsRef.current = timings;
-
-          const info = summarizeScore(score);
-          setSummary(info);
-          setScoreTempo(info.tempo);
-          setBeatsPerBar(info.initialTimeSignature.numerator);
-          setPhase("ready");
-
-          // SPEC §5.6 I-3 + §5.3 P-2：只渲染选定的 Track，且同时给出五线谱与 TAB
-          const trackIndex = Math.min(
-            Math.max(0, scoreFile.trackIndex),
-            Math.max(0, score.tracks.length - 1),
-          );
-          activeTrackRef.current = trackIndex;
-          applyStaveView(score, trackIndex, staveViewRef.current);
-          appliedViewRef.current = staveViewRef.current;
-          if (score.tracks.length > 1) {
-            const others = score.tracks.filter((_, i) => i !== trackIndex);
-            api!.changeTrackMute(others, true);
-            api!.renderTracks([score.tracks[trackIndex]]);
-          } else {
-            api!.render();
-          }
-        });
-
-        api.playerStateChanged.on((args) => {
-          const playing = args.state === 1;
-          setIsPlaying(playing);
-          if (playing) {
-            if (metroOnRef.current) metroRef.current?.enterFollowMode();
-          } else {
-            playbackStartingRef.current = false;
-            setPlaybackStarting(false);
-            lastBeatKeyRef.current = -1;
-            if (metroOnRef.current) void metroRef.current?.start();
-          }
-        });
-
-        api.playerPositionChanged.on((args) => {
-          const tick = args.currentTick;
-          // 首次播放时 AudioWorklet 异步启动；等真实播放推进后再开放暂停/停止。
-          if (playbackStartingRef.current && !args.isSeek && tick !== playbackStartTickRef.current) {
-            playbackStartingRef.current = false;
-            setPlaybackStarting(false);
-          }
-          const timings = timingsRef.current;
-
-          const loc = locateTick(timings, tick);
-          if (loc) setPositionBar(loc.bar);
-
-          if (metroOnRef.current && metroRef.current?.isFollowingPlayback && timings.length > 0) {
-            const key = (loc?.bar ?? 0) * 100 + (loc?.beat ?? 0);
-            if (key !== lastBeatKeyRef.current) {
-              if (lastBeatKeyRef.current !== -1) {
-                metroRef.current?.triggerBeat(loc?.beat ?? 0);
-              }
-              lastBeatKeyRef.current = key;
-            }
-          }
-
-          // 速度训练：识别"完整 Loop 一遍"
-          const range = rangeRef.current;
-          if (range && trainerRef.current.active) {
-            const prev = prevTickRef.current;
-            const wrapped =
-              prev > tick &&
-              tick <= range.startTick + 10 &&
-              prev >= range.endTick - 480;
-            if (wrapped) onLoopCompleted();
-          }
-          prevTickRef.current = tick;
-        });
-
-        api.load(scoreFile.url);
-      } catch (err) {
-        if (disposed) return;
-        setPhase("error");
-        setPhaseMessage(err instanceof Error ? err.message : "alphaTab 初始化失败");
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      try {
-        api?.destroy();
-      } catch {
-        /* 忽略销毁异常 */
-      }
-      apiRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoreFile?.id]);
-
-  // ---------------------------------------------------------------------
-  // 谱表显示范围切换（仅 TAB / 五线谱 + TAB / 仅五线谱）
-  // ---------------------------------------------------------------------
-  useEffect(() => {
-    staveViewRef.current = staveView;
-    const api = apiRef.current;
-    const score = api?.score;
-    if (!api || !score) return;
-    if (appliedViewRef.current === staveView) return;
-    appliedViewRef.current = staveView;
-
-    applyStaveView(score, activeTrackRef.current, staveView);
-    if (score.tracks.length > 1) {
-      api.renderTracks([score.tracks[activeTrackRef.current]]);
-    } else {
-      api.render();
-    }
-  }, [staveView]);
-
-  // ---------------------------------------------------------------------
-  // BPM → playbackSpeed（P-4 / P-5）
-  // ---------------------------------------------------------------------
-  useEffect(() => {
-    const api = apiRef.current;
-    if (!api || !scoreTempo) return;
-    const speed = Math.min(4, Math.max(0.1, bpm / scoreTempo));
-    try {
-      api.playbackSpeed = speed;
-    } catch {
-      /* 播放器未就绪时忽略 */
-    }
-  }, [bpm, scoreTempo, phase]);
-
-  // ---------------------------------------------------------------------
-  // Loop 区间（P-3）
-  // ---------------------------------------------------------------------
-  useEffect(() => {
-    const api = apiRef.current;
-    const timings = timingsRef.current;
-    if (!api || timings.length === 0) return;
-
-    const range = barRangeToTicks(timings, block.barStart, block.barEnd);
-    rangeRef.current = range;
-    try {
-      api.playbackRange = { startTick: range.startTick, endTick: range.endTick };
-      api.isLooping = loopEnabled;
-    } catch {
-      /* 忽略 */
-    }
-  }, [phase, loopEnabled, block.barStart, block.barEnd]);
-
-  // ---------------------------------------------------------------------
-  // 节拍器（P-6 / M-1）
-  // ---------------------------------------------------------------------
-  useEffect(() => {
-    if (!metroRef.current) metroRef.current = new Metronome();
-    const metro = metroRef.current;
-    metro.options.bpm = bpm;
-    metro.options.beatsPerBar = beatsPerBar;
-    metro.options.accentFirst = accentFirst;
-    metro.setVolume(metroVolume);
-  }, [bpm, beatsPerBar, accentFirst, metroVolume]);
-
-  useEffect(() => {
-    const metro = metroRef.current;
-    if (!metro) return;
-    if (metroOn && !isPlaying) void metro.start();
-    else if (!metroOn) metro.stop();
-    else if (metroOn && isPlaying) metro.enterFollowMode();
-  }, [metroOn, isPlaying]);
-
-  useEffect(() => () => metroRef.current?.dispose(), []);
 
   // ---------------------------------------------------------------------
   // 速度训练（B-4 / B-5）
@@ -428,6 +189,55 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     setBpm(nextBpm);
   }, []);
 
+  // ---------------------------------------------------------------------
+  // 播放位置变化：游标 / 节拍器跟随 / 速度训练计数
+  // ---------------------------------------------------------------------
+  const handlePosition = useCallback(
+    (p: ScorePlayerPosition) => {
+      // 首次播放时 AudioWorklet 异步启动；等真实播放推进后再开放暂停/停止。
+      if (
+        playbackStartingRef.current &&
+        !p.isSeek &&
+        p.tick !== playbackStartTickRef.current
+      ) {
+        playbackStartingRef.current = false;
+        setPlaybackStarting(false);
+      }
+
+      if (p.bar) setPositionBar(p.bar);
+
+      if (
+        metroOnRef.current &&
+        metroRef.current?.isFollowingPlayback &&
+        timingsRef.current.length > 0
+      ) {
+        const key = (p.bar ?? 0) * 100 + (p.beat ?? 0);
+        if (key !== lastBeatKeyRef.current) {
+          if (lastBeatKeyRef.current !== -1) {
+            metroRef.current?.triggerBeat(p.beat ?? 0);
+          }
+          lastBeatKeyRef.current = key;
+        }
+      }
+
+      // 速度训练：识别「完整 Loop 一遍」
+      const range = rangeRef.current;
+      if (range && trainerRef.current.active && p.previousTick >= 0) {
+        const wrapped =
+          p.previousTick > p.tick &&
+          p.tick <= range.startTick + 10 &&
+          p.previousTick >= range.endTick - 480;
+        if (wrapped) onLoopCompleted();
+      }
+    },
+    [onLoopCompleted],
+  );
+
+  const handlePlayerState = useCallback((playing: boolean) => {
+    setIsPlaying(playing);
+    if (!playing) lastBeatKeyRef.current = -1;
+  }, []);
+
   const startTrainer = () => {
     const config = { ...trainerRef.current.config };
     const next: TrainerState = { active: true, config, completedInStep: 0 };
@@ -458,33 +268,57 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   };
 
   // ---------------------------------------------------------------------
+  // 节拍器（P-6 / M-1）
+  // ---------------------------------------------------------------------
+  useEffect(() => {
+    if (!metroRef.current) metroRef.current = new Metronome();
+    const metro = metroRef.current;
+    metro.options.bpm = bpm;
+    metro.options.beatsPerBar = beatsPerBar;
+    metro.options.accentFirst = accentFirst;
+    metro.setVolume(metroVolume);
+  }, [bpm, beatsPerBar, accentFirst, metroVolume]);
+
+  useEffect(() => {
+    const metro = metroRef.current;
+    if (!metro) return;
+    if (metroOn && !isPlaying) void metro.start();
+    else if (!metroOn) metro.stop();
+    else if (metroOn && isPlaying) metro.enterFollowMode();
+  }, [metroOn, isPlaying]);
+
+  useEffect(() => () => metroRef.current?.dispose(), []);
+
+  // ---------------------------------------------------------------------
   // 播放控制
   // ---------------------------------------------------------------------
   const togglePlay = async () => {
-    const api = apiRef.current;
-    if (!api || !api.isReadyForPlayback || playbackStartingRef.current) return;
+    const player = playerRef.current;
+    if (!player || !player.readyForPlayback() || playbackStartingRef.current) {
+      return;
+    }
     await metroRef.current?.unlock();
 
     if (!isPlaying && rangeRef.current && loopEnabled) {
       const { startTick, endTick } = rangeRef.current;
-      const current = api.tickPosition;
+      const current = player.getTickPosition();
       if (current < startTick || current >= endTick) {
-        api.tickPosition = startTick;
+        player.setTickPosition(startTick);
       }
     }
     if (!isPlaying) {
-      playbackStartTickRef.current = api.tickPosition;
+      playbackStartTickRef.current = player.getTickPosition();
       playbackStartingRef.current = true;
       setPlaybackStarting(true);
     }
-    api.playPause();
+    player.playPause();
   };
 
   const stopPlayback = () => {
-    const api = apiRef.current;
-    if (!api || playbackStartingRef.current) return;
-    api.stop();
-    if (rangeRef.current) api.tickPosition = rangeRef.current.startTick;
+    const player = playerRef.current;
+    if (!player || playbackStartingRef.current) return;
+    player.stop();
+    if (rangeRef.current) player.setTickPosition(rangeRef.current.startTick);
   };
 
   const nudgeBpm = (delta: number) => {
@@ -518,81 +352,32 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
       </header>
 
       {/* ---------------- 乐谱区（P-2） ----------------
-          注意：alphaTab 是量取容器宽度来排版的，容器绝不能用 display:none，
-          因此这里让容器始终参与布局，加载/错误状态用绝对定位浮层覆盖。 */}
-      <div className="card overflow-hidden">
-        {scoreFile && phase === "ready" ? (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
-            <span className="text-[12px] font-semibold text-muted">
-              谱表
-            </span>
-            {(Object.keys(STAVE_VIEW_LABEL) as StaveView[]).map((v) => (
-              <button
-                key={v}
-                type="button"
-                className={`btn btn-sm ${staveView === v ? "btn-primary" : ""}`}
-                aria-pressed={staveView === v}
-                onClick={() => setStaveView(v)}
-              >
-                {STAVE_VIEW_LABEL[v]}
-              </button>
-            ))}
-            {positionBar ? (
-              <span className="chip ml-auto">当前第 {positionBar} 小节</span>
-            ) : null}
-          </div>
-        ) : null}
-
-        <div
-          ref={scrollRef}
-          className="score-scroll relative max-h-[46vh] min-h-[220px] overflow-auto bg-white px-2 py-3 sm:max-h-[52vh] sm:px-4"
-        >
-          <div
-            ref={containerRef}
-            className={scoreFile ? "min-h-[200px]" : "hidden"}
-          />
-
-          {phase === "loading" && scoreFile ? (
-            <div className="absolute inset-0 grid place-items-center bg-white/92 text-[13px] text-muted">
-              <div className="text-center">
-                <div className="pulse-dot text-lg">♪</div>
-                <div className="mt-2">正在解析乐谱…</div>
-              </div>
-            </div>
-          ) : null}
-
-          {phase === "error" && scoreFile ? (
-            <div className="absolute inset-0 grid place-items-center bg-white/95 px-4 text-center">
-              <div>
-                <div className="text-[14px] font-semibold text-danger">
-                  乐谱加载失败
-                </div>
-                <p className="mt-1 max-w-md text-[12.5px] text-muted">
-                  {phaseMessage || "请确认上传的是有效的 Guitar Pro / MusicXML 文件。"}
-                </p>
-                <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm mt-3">
-                  重新导入
-                </Link>
-              </div>
-            </div>
-          ) : null}
-
-          {!scoreFile ? (
-            <div className="grid h-[200px] place-items-center px-4 text-center">
-              <div>
-                <div className="text-[14px] font-semibold">这个段落还没有可播放的乐谱</div>
-                <p className="mt-1 max-w-md text-[12.5px] text-muted">
-                  上传 Guitar Pro 或 MusicXML 文件后即可在这里渲染五线谱 + TAB
-                  并跟练。教材 PDF 只作资料查看。
-                </p>
-                <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm mt-3">
-                  去上传乐谱
-                </Link>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
+          复用通用 ScorePlayer：Practice 只补充段落区间 / 循环 / BPM 等业务语义。 */}
+      <ScorePlayer
+        ref={playerRef}
+        source={scoreFile}
+        mode="practice"
+        barRange={{ start: block.barStart, end: block.barEnd }}
+        loop={loopEnabled}
+        playbackSpeed={scoreTempo > 0 ? Math.min(4, Math.max(0.1, bpm / scoreTempo)) : 1}
+        onScoreLoaded={({ summary, timings }) => {
+          timingsRef.current = timings;
+          setScoreTempo(summary.tempo);
+          setBeatsPerBar(summary.initialTimeSignature.numerator);
+          setScoreReady(true);
+        }}
+        onPlayerReadyChange={setPlayerReady}
+        onPlayerStateChange={handlePlayerState}
+        onPositionChange={handlePosition}
+        onRangeChange={(range) => {
+          rangeRef.current = range;
+        }}
+        errorAction={
+          <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm">
+            重新导入
+          </Link>
+        }
+      >
         {data.pdfFile ? (
           <div className="flex items-center gap-2 border-t border-line px-3 py-2 text-[12.5px]">
             <button
@@ -605,7 +390,6 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
             <span className="truncate text-faint">{data.pdfFile.fileName}</span>
           </div>
         ) : null}
-
         {showPdf && data.pdfFile ? (
           <iframe
             src={data.pdfFile.url}
@@ -613,14 +397,14 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
             title="练习资料"
           />
         ) : null}
-      </div>
+      </ScorePlayer>
 
       <section className="card card-pad practice-transport" aria-label="播放与练习速度">
         <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-5">
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="btn btn-accent btn-icon !h-14 !w-14 !rounded-full" onClick={togglePlay} disabled={phase !== "ready" || !scoreFile || !playerReady || playbackStarting} aria-label={playbackStarting ? "正在启动播放" : isPlaying ? "暂停" : "播放"}><Icon name={isPlaying ? "pause" : "play"} width="24" /></button>
-            <button type="button" className="btn btn-icon" onClick={stopPlayback} disabled={phase !== "ready" || !scoreFile || !playerReady || playbackStarting} aria-label="停止"><Icon name="stop" width="18" /></button>
-            <button type="button" className={`btn btn-sm ${loopEnabled ? "btn-accent" : ""}`} onClick={() => setLoopEnabled(v => !v)} disabled={phase !== "ready" || !scoreFile} aria-pressed={loopEnabled} title="按练习段落的小节范围循环"><Icon name="loop" width="18" />循环{loopEnabled ? "开启" : "关闭"}</button>
+            <button type="button" className="btn btn-accent btn-icon !h-14 !w-14 !rounded-full" onClick={togglePlay} disabled={!scoreReady || !playerReady || playbackStarting} aria-label={playbackStarting ? "正在启动播放" : isPlaying ? "暂停" : "播放"}><Icon name={isPlaying ? "pause" : "play"} width="24" /></button>
+            <button type="button" className="btn btn-icon" onClick={stopPlayback} disabled={!scoreReady || !playerReady || playbackStarting} aria-label="停止"><Icon name="stop" width="18" /></button>
+            <button type="button" className={`btn btn-sm ${loopEnabled ? "btn-accent" : ""}`} onClick={() => setLoopEnabled(v => !v)} disabled={!scoreReady} aria-pressed={loopEnabled} title="按练习段落的小节范围循环"><Icon name="loop" width="18" />循环{loopEnabled ? "开启" : "关闭"}</button>
             <button type="button" className={`btn btn-sm ${metroOn ? "btn-accent" : ""}`} onClick={() => { void metroRef.current?.unlock(); setMetroOn(v => !v); }} aria-pressed={metroOn}>节拍器{metroOn ? "开启" : "关闭"}</button>
           </div>
           <div>
