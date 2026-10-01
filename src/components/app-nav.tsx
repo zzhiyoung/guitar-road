@@ -10,6 +10,7 @@ const NAV: { href: string; label: string; short: string; icon: IconName }[] = [
   { href: "/library", label: "我的曲库", short: "曲库", icon: "library" },
   { href: "/dashboard", label: "成长足迹", short: "成长", icon: "chart" },
   { href: "/import", label: "导入曲谱", short: "导入", icon: "upload" },
+  { href: "/creator", label: "Creator", short: "识别", icon: "star" },
 ];
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();

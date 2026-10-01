@@ -52,6 +52,13 @@ export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
 /** SPEC §2.3：Album 标题最大长度。放在 domain 层，便于客户端表单复用。 */
 export const ALBUM_TITLE_MAX = 100;
 
+/**
+ * Creator / OMR 的输入限制（SPEC §4.2）。
+ * 放在 domain 层：客户端表单与服务端校验共用同一份常量。
+ */
+export const MAX_OMR_UPLOAD_BYTES = 20 * 1024 * 1024;
+export const OMR_IMAGE_MIME_TYPES = ["image/png", "image/jpeg"] as const;
+
 export type ScoreFileKind = "gp" | "musicxml" | "pdf";
 
 export function detectFileKind(fileName: string): ScoreFileKind | null {
