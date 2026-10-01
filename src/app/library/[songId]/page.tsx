@@ -102,9 +102,16 @@ export default async function SongDetailPage({
             ))}
           </div>
         </div>
-        <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm btn-accent">
-          + 新建 练习段落
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {playable ? (
+            <Link href={`/play/${song.id}`} className="btn btn-sm btn-accent">
+              ▶ 播放整曲
+            </Link>
+          ) : null}
+          <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm">
+            + 新建练习段落
+          </Link>
+        </div>
       </div>
 
       <Card className="card-pad">
@@ -153,7 +160,20 @@ export default async function SongDetailPage({
         </SectionTitle>
         {blockDetails.length === 0 ? (
           <Card className="card-pad text-[12.5px] text-muted">
-            还没有 练习段落。用上方表单圈出要攻克的小节范围。
+            <p>还没有练习段落。</p>
+            <p className="mt-1">
+              你可以直接播放整首曲目；需要针对某一段练习时，再创建练习段落。
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {playable ? (
+                <Link href={`/play/${song.id}`} className="btn btn-sm btn-accent">
+                  ▶ 播放整曲
+                </Link>
+              ) : null}
+              <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm">
+                ＋ 新建练习段落
+              </Link>
+            </div>
           </Card>
         ) : (
           <div className="block-grid">

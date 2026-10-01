@@ -13,7 +13,8 @@ const NAV: { href: string; label: string; short: string; icon: IconName }[] = [
 ];
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const practice = pathname.startsWith("/practice/");
+  // 练习页与整曲播放页都隐侧边栏，把横向空间全部留给谱面
+  const practice = pathname.startsWith("/practice/") || pathname.startsWith("/play/");
   return <div className={`app-shell ${practice ? "is-practice" : ""}`}>
     <a href="#main-content" className="skip-link">跳到主要内容</a>
     <aside className="app-sidebar no-print">

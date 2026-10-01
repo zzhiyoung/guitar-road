@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
 import { scoreFiles } from "@/lib/db/schema";
@@ -41,6 +41,34 @@ export async function getLatestScoreFile(
     .where(and(eq(scoreFiles.songId, songId), eq(scoreFiles.fileType, fileType)));
   if (rows.length === 0) return null;
   return rows.sort((a, b) => b.version - a.version)[0];
+}
+
+/**
+ * 批量取多个 Song 的「可播放」文件（GP / MusicXML，取 version 最大的一个）。
+ * 供 Library 列表判断哪些卡片可以显示「▶ 播放」入口。
+ */
+export async function listPlayableBySongs(
+  songIds: string[],
+): Promise<Map<string, ScoreFile>> {
+  const result = new Map<string, ScoreFile>();
+  if (songIds.length === 0) return result;
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(scoreFiles)
+    .where(
+      and(
+        inArray(scoreFiles.songId, songIds),
+        inArray(scoreFiles.fileType, ["gp", "musicxml"]),
+      ),
+    );
+
+  for (const row of rows) {
+    const current = result.get(row.songId);
+    if (!current || row.version > current.version) result.set(row.songId, row);
+  }
+  return result;
 }
 
 export async function createScoreFile(input: {

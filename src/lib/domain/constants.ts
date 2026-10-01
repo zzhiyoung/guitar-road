@@ -13,6 +13,9 @@ export const BPM_STEP_BIG = 10;
 /** 播放速度百分比（时间拉伸，音调不变） */
 export const SPEED_PRESETS = [50, 60, 70, 75, 80, 90, 100] as const;
 
+/** 整曲播放页的速度档位（SPEC §3.7），允许 >100% */
+export const SONG_SPEED_PRESETS = [50, 75, 100, 125] as const;
+
 export const FEELINGS = ["good", "normal", "hard"] as const;
 export type Feeling = (typeof FEELINGS)[number];
 
