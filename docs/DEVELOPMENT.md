@@ -6,22 +6,54 @@ Next.js 16 App Router、React 19、TypeScript、Tailwind CSS 4；alphaTab 1.8.4 
 
 ```text
 src/app/                 页面、Server Actions、文件读取 API
+src/app/play/[songId]/   整曲播放（只读，不产生练习记录）
+src/app/creator/         Creator：截图 → OMR → MusicXML 预览与下载
 src/components/          导入、曲库、练习、今日任务、成长与通用界面
-src/lib/db/              SQLite schema、连接与幂等建表
+src/components/player/   通用 alphaTab 播放器（Practice / 整曲播放 / Creator 共用）
+src/lib/db/              SQLite schema、连接、幂等建表与增量迁移
 src/lib/repositories/    数据读写
 src/lib/services/        今日与成长页面的聚合查询
 src/lib/storage/         FileStorage 与本地实现
 src/lib/domain/          日期、状态机、常量、表单结果
 src/lib/alphatab/        浏览器加载、谱表设置、小节与 tick 换算
+src/lib/creator/         OMR 子进程调用、临时目录与契约类型
 src/lib/audio/           WebAudio 节拍器
 public/alphatab/         上游运行时、字体、音源及许可声明
+tools/omr/              可选的 Python OMR sidecar（不参与 npm 依赖）
 scripts/                演示数据、PWA 图标生成
 assets/                 Windows 图标及其源 PNG
 ```
 
-页面不直接执行 SQL 或读写上传文件，通过仓储与 FileStorage 完成。数据库保存文件相对路径，配合 `GUITAR_FILES_DIR` 定位文件。八张表包括 users、books、songs、score_files、practice_blocks、practice_tasks、practice_sessions、notes。
+页面不直接执行 SQL 或读写上传文件，通过仓储与 FileStorage 完成。数据库保存文件相对路径，配合 `GUITAR_FILES_DIR` 定位文件。九张表包括 users、books、**albums**、songs、score_files、practice_blocks、practice_tasks、practice_sessions、notes。
 
-当前不需要 Supabase，也没有账户隔离。`drizzle.config.ts` 是未来手工生成迁移时的参考，运行时使用幂等 DDL；`drizzle-kit` 不在当前必需依赖中。未来云端迁移需要单独设计和验证，不能视为已实现功能。
+`albums` 是本轮新增的曲库分类（与 `books` 正交：`books` 是「教材 → 练习曲」的来源维度，`albums` 是「曲库 → 曲目」的整理维度）。`songs.album_id` 为 `ON DELETE SET NULL`：删除专辑只把曲目移回未分类，绝不删除曲目。
+
+当前不需要 Supabase，也没有账户隔离。`drizzle.config.ts` 是未来手工生成迁移时的参考；运行时先执行 `src/lib/db/client.ts` 的幂等 DDL，再执行 `src/lib/db/migrations.ts` 里登记过的增量迁移（记录在 `_migrations` 表，单条迁移一个事务，失败整体回滚）。新增列时**必须**走 `MIGRATIONS`，禁止 DROP TABLE 或要求用户删库。`drizzle-kit` 不在当前必需依赖中。未来云端迁移需要单独设计和验证，不能视为已实现功能。
+
+### 通用播放器 ScorePlayer
+
+`src/components/player/score-player.tsx` 是唯一的 alphaTab 初始化入口，Practice、整曲播放、Creator 预览三处复用：
+
+```text
+                 ScorePlayer
+                /     |      \
+         Song Player  Practice  Creator
+```
+
+它通过 `ref` 暴露 `playPause / stop / setTickPosition / getTickPosition / readyForPlayback`，
+并用回调把 `scoreLoaded / playerStateChanged / playerPositionChanged / playbackRange` 交给外层。
+练习业务（BPM 训练、Loop、节拍器、Session）一律留在 `practice-client.tsx`，不要下沉进播放器。
+改播放器时要同时回归 `/practice/<blockId>` 与 `/play/<songId>`。
+
+整曲播放是**只读**体验：不创建 Practice Block、不写 Practice Session、不影响 BPM 进度与 Streak。
+
+### Creator 与 OMR sidecar
+
+Creator 通过 `spawn(python, [...])` 调用 `tools/omr`（**不经过 shell**，用户文件名不会拼进命令）。
+契约见 [tools/omr/README.md](../tools/omr/README.md)：stdout 最后一行是 JSON，退出码 `0` 成功、`2` 引擎缺失。
+
+Python / homr / PyTorch 缺失时 `getOmrStatus()` 返回 `available: false`，`/creator` 正常打开，
+其余页面完全不受影响。**不要让 OMR 依赖进入 `package.json`。**
 
 ## 安装与运行
 
@@ -87,5 +119,16 @@ Service Worker 缓存静态资源，不缓存 API 与上传曲谱，也不提供
 4. 验证任务完成、恢复、跳过、延期，以及新最佳与普通保存反馈。
 5. 检查空数据库引导、手机/平板宽度、弹窗关闭和键盘焦点。
 6. 在实际使用设备上试听音频；PDF 只作资料查看。
+
+新增能力另需验证：
+
+7. **专辑**：新建 / 重命名 / 上移下移 / 删除；曲目加入、更换、移回未分类；`?album=<id>`、
+   `?album=unfiled` 与 `status` / `type` / `q` 组合筛选；删除专辑后曲目仍在。
+8. **整曲播放**：没有练习段落的曲目也能播放；播放后 `practice_blocks` /
+   `practice_sessions` / `practice_tasks` 均无新增；谱表切换与播放速度正常。
+9. **Creator**：未装引擎时应用能启动、`/creator` 能打开并提示未安装；装了引擎后
+   PNG / JPG / 粘贴截图都能识别，预览可播放，下载的 MusicXML 能被 Guitar Pro 导入。
+10. **迁移**：在真实数据库的**副本**上验证 `albums` 建表、`songs.album_id` 补列后
+    Songs / Blocks / Tasks / Sessions / Notes / Score Files / Books 数量不变。
 
 公开仓库的演示截图不构成真机音频或用户验收。Windows 启动器另需完成 [三条启动路径](LAUNCHER.md) 的验证。

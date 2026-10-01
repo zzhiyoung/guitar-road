@@ -440,4 +440,47 @@ Step 1–6 全链路（上传 → 解析 → 建 Block → 练习播放 → 记�
 
 ---
 
+---
+
+## 14. 增量需求：专辑 / 整曲播放 / Creator（执行说明）
+
+> Version: 1.1 | Date: 2026-10-01 | Status: **已实现**（分支 `feature/creator-library-player`）
+>
+> 本节记录原始 Spec 之外的一轮增量。行为以 [README](../README.md) 和 [DEVELOPMENT.md](DEVELOPMENT.md) 为准。
+
+### 14.1 三条工作流的边界
+
+| # | 需求 | 关键点 | 明确不做 |
+|---|---|---|---|
+| A | **Library 专辑管理** | `曲库 → 专辑 → 曲目` 只支持一层；专辑与教材（books）正交，可同时挂在同一个曲目上；删除专辑保留曲目（`ON DELETE SET NULL`） | 无限层级、封面、分享、拖拽排序、播放列表、智能专辑 |
+| B | **整曲播放** | 有 GP / MusicXML 即可 `/play/<songId>`；不创建隐形 Practice Block、不产生 Practice Session、不影响 BPM 进度与 Streak | 自动算练习时长、自动形成 Session、自动建 Block |
+| C | **Creator OMR MVP** | 截图/图片 → OMR → MusicXML → alphaTab 预览 → 下载 → Guitar Pro 校正；Python 是**可选** sidecar | TAB 专用 OCR、PDF/整本识别、MusicXML 编辑器、GP 写入、云端模型 |
+
+### 14.2 不可破坏的约束
+
+1. Guitar Road Core 只依赖 Node.js；`npm install && npm run build && npm run start` 必须成立。
+2. 没有 Python / homr / OpenCV / PyTorch 时：Today、Library、Dashboard、Practice、Song Player 全部正常，Creator 显示「识别引擎未安装」。
+3. `homr` 不进入 Node 依赖树；OMR 依赖不写入 `package.json`。
+4. 数据库迁移只增不改：禁止 DROP TABLE、禁止要求用户删库，现有数据必须完整保留。
+5. 调用 Python 一律 `spawn(command, args)`，**禁止**把用户文件名拼进 shell 命令。
+
+### 14.3 代码复用目标
+
+```text
+                 ScorePlayer
+                /     |      \
+         Song Player  Practice  Creator
+```
+
+`src/components/player/score-player.tsx` 是唯一的 alphaTab 初始化入口。
+练习业务（BPM 训练、Loop、节拍器、Session）留在 `practice-client.tsx`，不下沉进播放器。
+
+### 14.4 尚未验证 / 后续候选
+
+- **C-4 业务价值未验证**：8–16 小节练习的「人工修正 ≤ 3 分钟」是 benchmark，需要 10–20 个真实样本跑过再判断。若 homr 整体效果不好，先提交 benchmark 结果，再决定是否评估 Audiveris 或自研模型——不要在 benchmark 前扩大 UI scope。
+- Creator 阶段一不写数据库；确认识别效果后再考虑「加入 Guitar Road」。
+- 整曲播放的 P2 候选：任意小节 Loop、节拍器、AB 重复、临时 BPM —— 仍然不记为练习 Session。
+
+---
+
 *本 Spec 基于用户 PRD v1 整理，评审通过后进入 Phase 1 开发。*
