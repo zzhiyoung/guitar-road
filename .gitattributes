@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# Preserve unmodified upstream assets and their original license formatting.
+public/alphatab/** -text -whitespace

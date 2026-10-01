@@ -1,0 +1,50 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+
+# next.js
+/.next/
+/.next-*/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# local data (SQLite db + uploaded files) — 本地数据不入库
+/data/
+
+# misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# env (only the documented example is public)
+.env*
+!.env.example
+
+# vercel
+.vercel
+
+# local assistant state and historical design / personal-data screenshots
+/.workbuddy/
+/.codex/
+/.agents/
+/docs/design/
+/docs/screenshots/*.png
+
+# private databases and Python environments
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/.venv/
+/venv/
+__pycache__/
