@@ -45,6 +45,34 @@ export const books = sqliteTable("books", {
     .default(now),
 });
 
+/**
+ * 曲库分类（Album）—— 与 `books` 正交。
+ *
+ * - `books` 的语义是「教材 → 练习曲」（来源维度）
+ * - `albums` 的语义是「曲库分类 → 曲目」（整理维度，例如 Fingerstyle / 最近想练）
+ *
+ * 两者可以同时挂在同一个 Song 上，互不排斥。只支持 Library → Album → Song 一层。
+ */
+export const albums = sqliteTable(
+  "albums",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(now),
+  },
+  (t) => [index("albums_user_sort_idx").on(t.userId, t.sortOrder)],
+);
+
 /** 曲目 / 练习曲（Song 或 Exercise） */
 export const songs = sqliteTable(
   "songs",
@@ -59,6 +87,10 @@ export const songs = sqliteTable(
       .notNull()
       .default("song"),
     bookId: text("book_id").references(() => books.id, {
+      onDelete: "set null",
+    }),
+    /** 曲库分类；删除 Album 时置 NULL（曲目保留，回到「未分类」） */
+    albumId: text("album_id").references(() => albums.id, {
       onDelete: "set null",
     }),
     /** Exercise 关联教材页码 */
@@ -90,7 +122,10 @@ export const songs = sqliteTable(
       .notNull()
       .default(now),
   },
-  (t) => [index("songs_user_status_idx").on(t.userId, t.status)],
+  (t) => [
+    index("songs_user_status_idx").on(t.userId, t.status),
+    index("songs_album_idx").on(t.albumId),
+  ],
 );
 
 /** 乐谱文件（GP / MusicXML / PDF），同一 Song 可有多版本 */
@@ -261,9 +296,15 @@ export const booksRelations = relations(books, ({ one, many }) => ({
   songs: many(songs),
 }));
 
+export const albumsRelations = relations(albums, ({ one, many }) => ({
+  user: one(users, { fields: [albums.userId], references: [users.id] }),
+  songs: many(songs),
+}));
+
 export const songsRelations = relations(songs, ({ one, many }) => ({
   user: one(users, { fields: [songs.userId], references: [users.id] }),
   book: one(books, { fields: [songs.bookId], references: [books.id] }),
+  album: one(albums, { fields: [songs.albumId], references: [albums.id] }),
   scoreFiles: many(scoreFiles),
   blocks: many(practiceBlocks),
   notes: many(notes),
