@@ -165,7 +165,7 @@ export function CreatorClient({ initialStatus }: { initialStatus: OmrStatus }) {
           </div>
           <p className="mt-1 text-[12.5px] text-muted">
             {status.available
-              ? `${status.engine ?? "homr"} · 识别在本机完成，图片不会上传到任何服务器。`
+              ? `${status.engine ?? "homr"} · ${status.device === "cuda" ? "GPU" : "CPU"} 推理 · 识别在本机完成，图片不会上传到任何服务器。`
               : (status.message ??
                 "OMR 识别引擎尚未安装。Guitar Road 其他功能不受影响。")}
           </p>

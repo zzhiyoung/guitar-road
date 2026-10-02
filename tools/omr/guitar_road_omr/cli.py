@@ -13,14 +13,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from .engine import OmrError, OmrUnavailableError, RecognitionResult
-from .homr_adapter import DEFAULT_TIMEOUT_SECONDS, HomrEngine
+from .homr_adapter import DEFAULT_TIMEOUT_SECONDS, DEVICE_ENV, HomrEngine
 
 #: 允许的引擎名。新增引擎时在这里登记即可，Node 层无需改动。
 ENGINES: dict[str, type] = {"homr": HomrEngine}
+
+#: 推理设备：auto = 有 CUDA 就用，cpu = 强制 CPU，cuda = 强制 GPU
+DEVICES = ("auto", "cpu", "cuda")
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -32,22 +36,31 @@ def _emit(payload: dict) -> None:
     print(json.dumps(payload, ensure_ascii=False), flush=True)
 
 
-def _build_engine(name: str, timeout: int):
+def _build_engine(name: str, timeout: int, device: str):
     engine_cls = ENGINES.get(name)
     if engine_cls is None:
         raise OmrError(f"未知的识别引擎：{name}（可选：{', '.join(ENGINES)}）")
-    return engine_cls(timeout=timeout)
+    return engine_cls(timeout=timeout, device=device)
+
+
+def _device_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--device",
+        default=os.environ.get(DEVICE_ENV, "auto"),
+        choices=DEVICES,
+        help=f"推理设备（默认取环境变量 {DEVICE_ENV}，缺省 auto）",
+    )
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    engine = _build_engine(args.engine, args.timeout)
+    engine = _build_engine(args.engine, args.timeout, args.device)
     status = engine.status()
     _emit(status.to_json_dict())
     return EXIT_OK if status.available else EXIT_UNAVAILABLE
 
 
 def cmd_recognize(args: argparse.Namespace) -> int:
-    engine = _build_engine(args.engine, args.timeout)
+    engine = _build_engine(args.engine, args.timeout, args.device)
 
     status = engine.status()
     if not status.available:
@@ -87,6 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     status = sub.add_parser("status", help="探测识别引擎是否可用")
     status.add_argument("--engine", default="homr", choices=sorted(ENGINES))
     status.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    _device_arg(status)
     status.set_defaults(func=cmd_status)
 
     rec = sub.add_parser("recognize", help="把乐谱图片识别为 MusicXML")
@@ -98,6 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rec.add_argument("--engine", default="homr", choices=sorted(ENGINES))
     rec.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    _device_arg(rec)
     rec.set_defaults(func=cmd_recognize)
 
     return parser

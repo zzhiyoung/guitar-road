@@ -45,12 +45,15 @@ class EngineStatus:
     available: bool
     engine: str | None = None
     message: str | None = None
+    #: 实际可用的推理设备：`cuda` / `cpu`。UI 不做 GPU 配置，这里只用于状态展示。
+    device: str | None = None
 
     def to_json_dict(self) -> dict:
         return {
             "available": self.available,
             "engine": self.engine,
             "message": self.message,
+            "device": self.device,
         }
 
 

@@ -139,6 +139,7 @@ export async function getOmrStatus(): Promise<OmrStatus> {
         available: payload.available,
         engine: payload.engine ?? undefined,
         message: payload.message ?? (payload.available ? undefined : UNAVAILABLE_MESSAGE),
+        device: payload.device ?? undefined,
       };
     }
 

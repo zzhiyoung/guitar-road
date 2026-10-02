@@ -39,9 +39,16 @@ DEFAULT_TIMEOUT_SECONDS = 120
 #:   GUITAR_ROAD_HOMR_CMD='["uvx", "--from", "homr[cpu]", "homr"]'
 COMMAND_OVERRIDE_ENV = "GUITAR_ROAD_HOMR_CMD"
 
-#: 额外透传给 homr 的参数（JSON 数组），例如 GPU 选择：
-#:   GUITAR_ROAD_HOMR_ARGS='["--gpu", "no"]'
+#: 额外透传给 homr 的参数（JSON 数组）
 EXTRA_ARGS_ENV = "GUITAR_ROAD_HOMR_ARGS"
+
+#: 推理设备：`auto` / `cpu` / `cuda`（默认 auto）
+DEVICE_ENV = "GUITAR_ROAD_OMR_DEVICE"
+
+DeviceMode = str  # "auto" | "cpu" | "cuda"
+
+#: 我们的设备名 → homr 的 `--gpu` 取值
+_GPU_ARG: dict[str, str] = {"auto": "auto", "cpu": "no", "cuda": "force"}
 
 # `python -c` 的兜底启动器：homr 没有 __main__.py 时也能跑
 _FALLBACK_RUNNER = (
@@ -90,11 +97,56 @@ def _resolve_command() -> list[str] | None:
     return None
 
 
+_device_cache: str | None = None
+
+
+def _cuda_runtime_present() -> bool:
+    """CUDA 运行时是否真的装齐。
+
+    这里**故意不去建 InferenceSession**：实测在本机（装了 onnxruntime-gpu 但缺
+    CUDA 13 / cuDNN 9 运行时）时，初始化 CUDA provider 会**把整个 Python 进程带崩**
+    （exit -1，且时好时坏）。`status` 是每次打开 Creator 都要跑的，绝不能崩，
+    所以改成检查 `nvidia-*-cu*` pip 包是否落地。
+    """
+    try:
+        import onnxruntime as ort
+
+        if "CUDAExecutionProvider" not in ort.get_available_providers():
+            return False
+
+        site_packages = Path(ort.__file__).parent.parent
+        nvidia = site_packages / "nvidia"
+        if not nvidia.is_dir():
+            return False
+
+        installed = {p.name.lower() for p in nvidia.iterdir() if p.is_dir()}
+        # ORT 的 CUDA provider 至少依赖这几组运行时
+        return all(
+            any(key in name for name in installed)
+            for key in ("cublas", "cudnn", "cuda_runtime", "nvrtc")
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _detect_device() -> str:
+    """当前实际可用的推理设备：`cuda` 或 `cpu`。"""
+    global _device_cache
+    if _device_cache is None:
+        _device_cache = "cuda" if _cuda_runtime_present() else "cpu"
+    return _device_cache
+
+
 class HomrEngine(OmrEngine):
     name = "homr"
 
-    def __init__(self, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        timeout: int = DEFAULT_TIMEOUT_SECONDS,
+        device: DeviceMode = "auto",
+    ) -> None:
         self.timeout = timeout
+        self.device = device if device in _GPU_ARG else "auto"
         self._command: list[str] | None = None
 
     # ------------------------------------------------------------------
@@ -109,10 +161,16 @@ class HomrEngine(OmrEngine):
                 message="未检测到 homr。请参考 tools/omr/README.md 安装识别引擎。",
             )
         self._command = command
+
+        runtime = _detect_device()
+        # cpu 模式下显式说明，避免用户以为 GPU 没生效是 bug
+        using = "cuda" if (self.device != "cpu" and runtime == "cuda") else "cpu"
+        suffix = "（GPU）" if using == "cuda" else "（CPU）"
         return EngineStatus(
             available=True,
             engine=self.name,
-            message="homr 已就绪",
+            message=f"homr 已就绪{suffix}",
+            device=using,
         )
 
     # ------------------------------------------------------------------
@@ -139,7 +197,7 @@ class HomrEngine(OmrEngine):
 
         # 不默认塞 --gpu / --debug 等可选参数：不同 homr 版本参数集合不同，
         # 需要时通过 GUITAR_ROAD_HOMR_ARGS 透传（README 有示例）。
-        args = [*command, *self._extra_args(), str(input_path)]
+        args = [*command, *self._device_args(), *self._extra_args(), str(input_path)]
         _log(f"[omr] 执行：{' '.join(args)}")
 
         try:
@@ -192,16 +250,31 @@ class HomrEngine(OmrEngine):
         )
 
     # ------------------------------------------------------------------
-    @staticmethod
-    def _extra_args() -> list[str]:
+    def _extra_args(self) -> list[str]:
         raw = os.environ.get(EXTRA_ARGS_ENV, "").strip()
-        if not raw:
-            return []
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            return raw.split()
-        return [str(x) for x in parsed] if isinstance(parsed, list) else []
+        args: list[str] = []
+        if raw:
+            try:
+                parsed: object = json.loads(raw)
+            except json.JSONDecodeError:
+                parsed = shlex.split(raw)
+            if isinstance(parsed, list):
+                args = [str(x) for x in parsed]
+
+        # --gpu 由 --device 统一管理，避免两处配置打架
+        if "--gpu" in args:
+            index = args.index("--gpu")
+            args = args[:index] + args[index + 2 :]
+
+        return args
+
+    def _device_args(self) -> list[str]:
+        if self.device == "auto":
+            # homr 自己的 `cuda_available()` 只看 provider 名单，缺运行时时会误判为有 GPU，
+            # 然后去拉 fp16 模型并初始化 CUDA —— 本机实测可能直接崩进程。
+            # 所以 auto 由我们拍板：运行时没装齐就明确走 CPU。
+            return ["--gpu", "auto" if _detect_device() == "cuda" else "no"]
+        return ["--gpu", _GPU_ARG[self.device]]
 
     @staticmethod
     def _locate_output(

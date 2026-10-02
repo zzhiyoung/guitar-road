@@ -94,6 +94,7 @@ npm run dev
 | `GUITAR_ROAD_OMR_PYTHON` | Creator 使用的 Python 解释器 | 依次尝试 `python` / `py` / `python3` |
 | `GUITAR_ROAD_HOMR_CMD` | 覆盖 homr 的调用方式（JSON 数组） | 自动探测 |
 | `GUITAR_ROAD_HOMR_ARGS` | 额外透传给 homr 的参数（JSON 数组） | 无 |
+| `GUITAR_ROAD_OMR_DEVICE` | 推理设备 `auto` / `cpu` / `cuda` | `auto` |
 
 独立输出目录用于开发或预览，启动器只支持默认 `.next`。Owner 配置影响首次创建的用户，不会自动改写已有记录。Node 直接运行的 seed 脚本不会自动加载 `.env.local`；使用自定义路径时需在终端设置环境变量。
 

@@ -4,6 +4,8 @@ export interface OmrStatus {
   available: boolean;
   engine?: string;
   message?: string;
+  /** 只读展示用：`cuda` / `cpu`。本分支不做 GPU 配置 UI。 */
+  device?: string;
 }
 
 export interface OmrSuccess {

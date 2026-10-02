@@ -179,7 +179,68 @@ python -m guitar_road_omr recognize <input.png> --output <output.musicxml>
 
 ---
 
-## 3. 环境变量
+## 3. 推理设备（CPU / CUDA）
+
+`recognize` 与 `status` 都支持 `--device`：
+
+| 取值 | 含义 | 映射到 homr |
+|---|---|---|
+| `auto` | 有 CUDA 就用，否则 CPU（**默认**） | `--gpu auto` |
+| `cpu` | 强制 CPU | `--gpu no` |
+| `cuda` | 强制 GPU（没装好 CUDA 运行时会报错） | `--gpu force` |
+
+```bash
+.venv/Scripts/python -m guitar_road_omr status --device auto
+# {"available":true,"engine":"homr","message":"homr 已就绪（CPU）","device":"cpu"}
+
+GUITAR_ROAD_OMR_DEVICE=cpu .venv/Scripts/python -m guitar_road_omr recognize a.png --output a.musicxml
+```
+
+也可以用环境变量 `GUITAR_ROAD_OMR_DEVICE` 设默认值。
+`GUITAR_ROAD_HOMR_ARGS` 里如果带了 `--gpu`，会被 `--device` 覆盖（避免两处配置打架）。
+
+### 3.1 CPU 还是 CUDA：先看清瓶颈
+
+在 Intel CPU + RTX 3070 上，用一张 1169×566、9 小节（3 个 staff）的谱面实测：
+
+| 阶段 | 耗时 | 占比 |
+| --- | --- | --- |
+| Python 启动 + `import homr.main` | ~2.9 s | 30% |
+| 图像预处理 / 五线谱定位 / dewarp / 写 XML | ~3.5 s | 36% |
+| **模型推理**（segnet ~1.0–1.6 s + TrOmr 3×~0.6 s） | ~3.4 s | 35% |
+| **合计** | **约 9.6 s** | |
+
+也就是说：**推理只占三分之一，剩下是进程启动和模型加载。** 换 GPU 只能加速推理那一块：
+
+- 9 小节这类小片段：推理 3.4 s → 约 0.7–1.1 s，**总耗时 ~9.6 s → ~7 s，只快 25% 左右**。
+- 整页 / 多 staff 的谱子：推理随 staff 数量线性增长，GPU 收益会明显变大。
+
+所以默认选 CPU 不是偷懒，而是**投入产出比**：为这 25% 要额外下载 2–3 GB 的 CUDA/cuDNN 运行时。
+
+### 3.2 想用 CUDA 就自己开（可选）
+
+onnxruntime-gpu 已经装好了，缺的是 NVIDIA 运行时（ORT 1.30 要求 **CUDA 13 + cuDNN 9**）：
+
+```bash
+# 约 2–3 GB，装完 --device cuda 即可生效
+PYTHONPATH="" .venv/Scripts/python -m pip install "onnxruntime-gpu[cuda]==1.30.0" \
+  -i https://mirrors.aliyun.com/pypi/simple/ --timeout 60 --retries 5
+
+# GPU 模式用的是 fp16 模型，需要额外下载 3 个权重文件（见 §1.5，文件名带 _fp16）
+.venv/Scripts/python -m guitar_road_omr status --device cuda
+```
+
+装不了 / 出问题就退回 CPU，功能完全不受影响：
+
+```bash
+.venv/Scripts/python -m guitar_road_omr recognize a.png --output a.musicxml --device cpu
+```
+
+> 注意：`pip install` 时如果遇到
+> `SAFE_DELETE_BULK_CONFIRM_REQUIRED` 之类的拦截，是本机 Python shim 造成的，
+> 加 `PYTHONPATH=""` 再跑一次即可（pip 卸载旧包时会触发）。
+
+## 4. 环境变量
 
 | 变量 | 用途 |
 | --- | --- |
@@ -200,7 +261,7 @@ export GUITAR_ROAD_HOMR_ARGS='["--gpu", "no"]'
 
 ---
 
-## 4. 为什么 homr 没有 `--output`
+## 5. 为什么 homr 没有 `--output`
 
 homr 的 CLI 只接受一个位置参数（图片或目录），产物固定写在
 **输入文件同目录、同名、`.musicxml`**。因此适配器会在受控目录里调用它，
@@ -208,7 +269,7 @@ homr 的 CLI 只接受一个位置参数（图片或目录），产物固定写�
 
 ---
 
-## 5. 实测记录（CPU，Windows）
+## 6. 实测记录（CPU，Windows）
 
 用一张 1169×566 的谱面截图（五线谱 + TAB，9 小节）实测：
 
@@ -224,7 +285,7 @@ SPEC 的定位一致：识别出的是草稿，指法与把位仍需在 Guitar P
 homr 会在输入图片旁边生成 `<名字>_teaser.png` 可视化图；`tools/omr` 的适配器只在
 受控临时目录里运行，Node 层任务结束后整目录清理，不会污染用户目录。
 
-## 6. 已知限制（v0.1）
+## 7. 已知限制（v0.1）
 
 - 只做「图片 → MusicXML 草稿」，**不做修谱**。复杂校对继续用 Guitar Pro。
 - 不支持 PDF、整本教材、批量识别、拍照透视矫正。
