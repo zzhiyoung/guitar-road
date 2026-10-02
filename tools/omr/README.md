@@ -54,10 +54,79 @@ pip install 'homr[cpu]'
 
 首次运行会自动下载 ONNX 模型（约 190 MB）。
 
-### 1.4 验证
+### 1.4 推荐：仓库内的独立 venv
+
+不要把 homr 装进系统 Python，也不要让它进 `package.json`。推荐建一个专属 venv：
 
 ```bash
-python -m guitar_road_omr status
+cd tools/omr
+
+# 用 Python 3.10 / 3.11 / 3.12（homr 不支持 3.13+）
+py -V:Astral/CPython3.12.14 -m venv .venv     # 或 python3.12 -m venv .venv
+
+# 构建后端要先备好：homr 的依赖 antlr4-python3-runtime 是 sdist，需要现场构建
+.venv/Scripts/python -m pip install setuptools wheel poetry-core
+
+# 装 wrapper
+.venv/Scripts/python -m pip install -e .
+
+# 装识别引擎（国内建议加镜像；官方 PyPI 也可，只是慢）
+.venv/Scripts/python -m pip install "homr[cpu]" \
+  -i https://pypi.tuna.tsinghua.edu.cn/simple \
+  --extra-index-url https://pypi.org/simple \
+  --no-build-isolation
+```
+
+然后在项目根目录的 `.env.local` 里指向这个解释器，Creator 才能找到它：
+
+```
+GUITAR_ROAD_OMR_PYTHON=D:/coding/Guitar Road/tools/omr/.venv/Scripts/python.exe
+```
+
+> `--no-build-isolation` 是必需的：homr 及其部分依赖是 poetry/sdist 包，构建隔离环境里
+> 常常拉不到 `setuptools`，会报
+> `Could not find a version that satisfies the requirement setuptools>=40.8.0`。
+> 关掉隔离后，上面预装的构建后端就会被复用。
+
+### 1.5 预下载模型（国内强烈建议）
+
+homr 首次运行会从 **GitHub Releases** 拉 3 个 ONNX 模型（约 140 MB）。国内直连常常只有
+每秒几十 KB，会慢到不可用。用 GitHub 加速镜像手动放到位最快：
+
+```bash
+cd tools/omr
+BASE="https://gh-proxy.com/https://github.com/liebharc/homr/releases/download/onnx_checkpoints"
+SP=.venv/Lib/site-packages/homr
+
+mkdir -p .models
+for n in segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f \
+         encoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903 \
+         decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903; do
+  curl -L -o ".models/$n.zip" "$BASE/$n.zip"
+done
+
+.venv/Scripts/python -c "
+import zipfile, pathlib
+sp = pathlib.Path('.venv/Lib/site-packages/homr')
+mapping = {
+  'segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.zip': sp/'segmentation',
+  'encoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.zip': sp/'transformer',
+  'decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.zip': sp/'transformer',
+}
+for name, dest in mapping.items():
+    with zipfile.ZipFile(pathlib.Path('.models')/name) as z:
+        z.extractall(dest)
+"
+rm -rf .models
+```
+
+模型文件是 homr 版本绑定的；升级 homr 后需要按新版本的文件名重新下载。
+也可以直接跑 `homr --init` 让它自己下，只是慢。
+
+### 1.6 验证
+
+```bash
+.venv/Scripts/python -m guitar_road_omr status
 ```
 
 可用时 stdout 最后一行：
@@ -70,6 +139,12 @@ python -m guitar_road_omr status
 
 ```json
 {"available": false, "engine": null, "message": "未检测到 homr。请参考 tools/omr/README.md 安装识别引擎。"}
+```
+
+也可以直接识别一张图，确认端到端可用：
+
+```bash
+.venv/Scripts/python -m guitar_road_omr recognize sheet.png --output sheet.musicxml
 ```
 
 ---
@@ -133,7 +208,23 @@ homr 的 CLI 只接受一个位置参数（图片或目录），产物固定写�
 
 ---
 
-## 5. 已知限制（v0.1）
+## 5. 实测记录（CPU，Windows）
+
+用一张 1169×566 的谱面截图（五线谱 + TAB，9 小节）实测：
+
+| 项目 | 结果 |
+| --- | --- |
+| 端到端耗时 | 约 10 秒（含 Node 起子进程 + 模型加载） |
+| 输出 | 14.8 KB MusicXML，10 小节 / 51 个音高音符 |
+| 结论 | 五线谱部分可用作草稿 |
+
+**homr 只读五线谱，不读 TAB。** 截图里同时有五线谱和 TAB 时，TAB 会被忽略 —— 这与
+SPEC 的定位一致：识别出的是草稿，指法与把位仍需在 Guitar Pro 里补。
+
+homr 会在输入图片旁边生成 `<名字>_teaser.png` 可视化图；`tools/omr` 的适配器只在
+受控临时目录里运行，Node 层任务结束后整目录清理，不会污染用户目录。
+
+## 6. 已知限制（v0.1）
 
 - 只做「图片 → MusicXML 草稿」，**不做修谱**。复杂校对继续用 Guitar Pro。
 - 不支持 PDF、整本教材、批量识别、拍照透视矫正。

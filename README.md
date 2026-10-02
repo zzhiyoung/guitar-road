@@ -103,15 +103,25 @@ Creator 把「截图 → MusicXML → Guitar Pro」这条链路跑通，用于�
 
 ```bash
 cd tools/omr
-pip install -e .
 
-# 安装识别引擎（任选其一）
-uvx --from 'homr[cpu]' homr --help     # uvx，推荐
-pip install 'homr[cpu]'                # 装进当前环境
+# 建议用独立 venv（Python 3.10-3.12），不要把 homr 装进系统环境
+python -m venv .venv
+.venv/Scripts/python -m pip install setuptools wheel poetry-core
 
-# 验证
-python -m guitar_road_omr status
+.venv/Scripts/python -m pip install -e .
+.venv/Scripts/python -m pip install "homr[cpu]"
+
+.venv/Scripts/python -m guitar_road_omr status     # 验证
 ```
+
+然后在项目根目录的 `.env.local` 里指向这个解释器，Creator 才能找到它：
+
+```
+GUITAR_ROAD_OMR_PYTHON=D:/coding/Guitar Road/tools/omr/.venv/Scripts/python.exe
+```
+
+模型权重（约 140 MB）来自 GitHub Releases，国内直连很慢，
+[tools/omr/README.md](tools/omr/README.md) 里有镜像下载与常见问题。
 
 识别在本机完成，图片不会上传到任何服务器；每次任务使用独立临时目录并在结束后清理。识别结果只是草稿，下载后用 Guitar Pro 校正，再从「导入曲谱」加入 Guitar Road。完整说明见 [tools/omr/README.md](tools/omr/README.md)。
 

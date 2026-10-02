@@ -67,6 +67,14 @@ def _resolve_command() -> list[str] | None:
             return list(parsed)
         _log(f"[omr] 忽略非法的 {COMMAND_OVERRIDE_ENV}")
 
+    # 先看当前解释器同目录（venv/Scripts、venv/bin）——
+    # 用 venv 的 python 调用时，homr 的 console script 通常不在 PATH 上。
+    exe_dir = Path(sys.executable).parent
+    for name in ("homr.exe", "homr"):
+        candidate = exe_dir / name
+        if candidate.is_file():
+            return [str(candidate)]
+
     which = shutil.which("homr")
     if which:
         return [which]
@@ -111,8 +119,9 @@ class HomrEngine(OmrEngine):
     # 识别
     # ------------------------------------------------------------------
     def recognize(self, input_path: Path, output_path: Path) -> RecognitionResult:
-        input_path = Path(input_path)
-        output_path = Path(output_path)
+        # 必须用绝对路径：下面把 cwd 切到输入所在目录，相对路径会相对它解析而失效
+        input_path = Path(input_path).resolve()
+        output_path = Path(output_path).resolve()
 
         if not input_path.is_file():
             raise OmrError(f"输入文件不存在：{input_path}")
