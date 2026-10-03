@@ -191,7 +191,7 @@ input[type="range"] { min-height: 44px; }
   .app-sidebar { display: none; }
   .app-main { margin: 0; padding: 28px 24px calc(108px + env(safe-area-inset-bottom)); }
   .mobile-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: calc(18px + env(safe-area-inset-top)) 24px 4px; }
-  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: #fffefaee; border-top: 1px solid var(--color-line); backdrop-filter: blur(16px); }
+  .mobile-nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 40; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background: #fffefaee; border-top: 1px solid var(--color-line); backdrop-filter: blur(16px); }
   .mobile-nav a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; min-height: 48px; font-size: 11px; color: var(--color-muted); border-radius: 12px; }
   .mobile-nav a.active { color: var(--color-accent); background: var(--color-accent-soft); }
   .today-grid { grid-template-columns: minmax(0, 1fr); }

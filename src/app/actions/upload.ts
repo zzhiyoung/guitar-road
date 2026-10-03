@@ -9,6 +9,7 @@ import * as booksRepo from "@/lib/repositories/books";
 import * as scoreFilesRepo from "@/lib/repositories/score-files";
 import * as songsRepo from "@/lib/repositories/songs";
 import { getStorage } from "@/lib/storage";
+import { readScoreSummary } from "@/lib/alphatab/server-score";
 import {
   MAX_UPLOAD_BYTES,
   detectFileKind,
@@ -59,12 +60,17 @@ export async function uploadScoreFileAction(
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
+  let summary;
+  if (kind !== "pdf") {
+    try { summary = readScoreSummary(buffer); }
+    catch { return errorState("无法解析这份乐谱，请确认文件有效，或通过 Creator 校对后导出 MusicXML。"); }
+  }
 
   // 1. 确定归属曲目
   const existingSongId = readString(form, "songId");
   const providedTitle = readString(form, "title");
   const fallbackTitle =
-    providedTitle || file.name.replace(/\.[^.]+$/, "") || "Untitled";
+    providedTitle || summary?.title || file.name.replace(/\.[^.]+$/, "") || "Untitled";
 
   let songId = existingSongId;
   if (songId) {
@@ -74,7 +80,7 @@ export async function uploadScoreFileAction(
     const song = await songsRepo.createSong({
       userId,
       title: fallbackTitle,
-      artist: readString(form, "artist") || null,
+      artist: readString(form, "artist") || summary?.artist || null,
       type: readString(form, "type") === "exercise" ? "exercise" : "song",
       difficulty: readOptionalNumber(form, "difficulty"),
       pdfPage: readOptionalNumber(form, "pdfPage"),

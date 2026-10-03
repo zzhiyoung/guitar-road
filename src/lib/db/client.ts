@@ -10,6 +10,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
+import { runMigrations } from "./migrations";
 import * as schema from "./schema";
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>;
@@ -29,6 +30,7 @@ export function dbFilePath(): string {
 const globalForDb = globalThis as unknown as {
   __guitarDb?: AppDatabase;
   __guitarDbReady?: boolean;
+  __guitarDbMigrated?: boolean;
 };
 
 function createConnection(): AppDatabase {
@@ -176,6 +178,11 @@ export function getDb(): AppDatabase {
   if (!globalForDb.__guitarDbReady) {
     bootstrapSchema(db);
     globalForDb.__guitarDbReady = true;
+  }
+  // 建表（含全新库）之后再跑增量迁移：老库只拿到 ADD COLUMN，不丢任何数据
+  if (!globalForDb.__guitarDbMigrated) {
+    runMigrations(db);
+    globalForDb.__guitarDbMigrated = true;
   }
   return db;
 }

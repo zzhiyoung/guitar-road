@@ -48,6 +48,9 @@ export function SongSetup({ song, scoreFile, initialSetup }: SongSetupProps) {
   const [trackIndex, setTrackIndex] = useState(scoreFile?.trackIndex ?? 0);
   const [showScore, setShowScore] = useState(initialSetup);
   const [metaOpen, setMetaOpen] = useState(false);
+  const [currentBpmInput, setCurrentBpmInput] = useState<string | null>(null);
+  const [targetBpmInput, setTargetBpmInput] = useState<string | null>(null);
+  const [barEndInput, setBarEndInput] = useState<string | null>(null);
 
   const [blockState, blockAction, blockPending] = useActionState<FormState, FormData>(
     createBlockAction,
@@ -364,7 +367,8 @@ export function SongSetup({ song, scoreFile, initialSetup }: SongSetupProps) {
               name="barEnd"
               min={1}
               max={barCount ?? undefined}
-              defaultValue={barCount ?? 8}
+              value={barEndInput ?? String(barCount ?? 8)}
+              onChange={(e) => setBarEndInput(e.target.value)}
               required
             />
           </label>
@@ -376,7 +380,8 @@ export function SongSetup({ song, scoreFile, initialSetup }: SongSetupProps) {
               name="currentBpm"
               min={30}
               max={300}
-              defaultValue={Math.min(60, summary?.tempo ?? 90)}
+              value={currentBpmInput ?? String(Math.min(300, Math.max(30, summary?.tempo ?? 90)))}
+              onChange={(e) => setCurrentBpmInput(e.target.value)}
             />
           </label>
           <label className="block">
@@ -387,7 +392,8 @@ export function SongSetup({ song, scoreFile, initialSetup }: SongSetupProps) {
               name="targetBpm"
               min={30}
               max={300}
-              defaultValue={Math.max(90, summary?.tempo ?? 90)}
+              value={targetBpmInput ?? String(Math.min(300, Math.max(30, summary?.tempo ?? 90)))}
+              onChange={(e) => setTargetBpmInput(e.target.value)}
             />
           </label>
           <label className="block">

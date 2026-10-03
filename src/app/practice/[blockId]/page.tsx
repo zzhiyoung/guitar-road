@@ -39,11 +39,11 @@ export default async function PracticePage({
   const playable =
     [...scoreFiles]
       .filter((f) => f.fileType === "gp" || f.fileType === "musicxml")
-      .sort((a, b) => b.version - a.version)[0] ?? null;
+      .sort(scoreFilesRepo.latestScoreFirst)[0] ?? null;
   const pdf =
     [...pdfFiles]
       .filter((f) => f.fileType === "pdf")
-      .sort((a, b) => b.version - a.version)[0] ?? null;
+      .sort(scoreFilesRepo.latestScoreFirst)[0] ?? null;
 
   const [notes, sessions, recommended, todayTasks] = await Promise.all([
     notesRepo.listNotes("block", block.id),
@@ -72,6 +72,7 @@ export default async function PracticePage({
       targetBpm: block.targetBpm,
       defaultBpm: block.defaultBpm,
       defaultLoop: block.defaultLoop,
+      isWholeSong: block.isWholeSong,
       note: block.note,
       speedTrainingConfig: block.speedTrainingConfig ?? null,
     },

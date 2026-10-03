@@ -47,4 +47,6 @@ yarn-error.log*
 *.sqlite3
 /.venv/
 /venv/
+tools/omr/.venv/
+tools/omr/*.egg-info/
 __pycache__/

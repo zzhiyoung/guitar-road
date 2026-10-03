@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 
 import { getDb } from "@/lib/db/client";
 import { scoreFiles } from "@/lib/db/schema";
 
 export type ScoreFile = typeof scoreFiles.$inferSelect;
 export type ScoreFileKind = ScoreFile["fileType"];
+
+/** Versions are per format; compare upload times across GP and MusicXML. */
+export function latestScoreFirst(a: ScoreFile, b: ScoreFile): number {
+  return b.createdAt.getTime() - a.createdAt.getTime() || b.version - a.version;
+}
 
 export async function listScoreFiles(songId: string): Promise<ScoreFile[]> {
   const db = getDb();
@@ -43,6 +48,34 @@ export async function getLatestScoreFile(
   return rows.sort((a, b) => b.version - a.version)[0];
 }
 
+/**
+ * 批量取多个 Song 的最新上传的「可播放」文件（GP / MusicXML）。
+ * 供 Library 列表判断哪些卡片可以显示「▶ 播放」入口。
+ */
+export async function listPlayableBySongs(
+  songIds: string[],
+): Promise<Map<string, ScoreFile>> {
+  const result = new Map<string, ScoreFile>();
+  if (songIds.length === 0) return result;
+
+  const db = getDb();
+  const rows = await db
+    .select()
+    .from(scoreFiles)
+    .where(
+      and(
+        inArray(scoreFiles.songId, songIds),
+        inArray(scoreFiles.fileType, ["gp", "musicxml"]),
+      ),
+    );
+
+  for (const row of rows) {
+    const current = result.get(row.songId);
+    if (!current || latestScoreFirst(row, current) < 0) result.set(row.songId, row);
+  }
+  return result;
+}
+
 export async function createScoreFile(input: {
   userId: string;
   songId: string;
@@ -72,6 +105,7 @@ export async function createScoreFile(input: {
       storagePath: input.storagePath,
       trackIndex: input.trackIndex ?? 0,
       version: nextVersion,
+      createdAt: new Date(),
     })
     .returning();
   return row;

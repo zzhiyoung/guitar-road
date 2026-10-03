@@ -1,0 +1,19 @@
+[project]
+name = "guitar-road-omr"
+version = "0.1.0"
+description = "Optional OMR sidecar for Guitar Road Creator (image -> MusicXML)"
+readme = "README.md"
+requires-python = ">=3.10"
+# 注意：这里**故意不**把 homr / torch / opencv 列为硬依赖。
+# Guitar Road 核心只依赖 Node.js；OMR 环境是可选的，缺失时 Creator 页面
+# 显示「识别引擎未安装」，其余功能完全不受影响（SPEC §1.1 / §4.11）。
+dependencies = []
+
+[project.optional-dependencies]
+# 仅在需要时安装：`pip install -e '.[homr]'`
+homr = ["homr==0.7.0"]
+# Experimental Creator TAB pipeline; local OCR weights are prepared separately.
+tab = ["rapidocr==3.9.2", "Pillow>=12,<13", "onnxruntime>=1.24,<2"]
+
+[tool.setuptools]
+packages = ["guitar_road_omr"]

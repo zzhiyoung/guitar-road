@@ -13,6 +13,9 @@ export const BPM_STEP_BIG = 10;
 /** 播放速度百分比（时间拉伸，音调不变） */
 export const SPEED_PRESETS = [50, 60, 70, 75, 80, 90, 100] as const;
 
+/** 整曲播放页的速度档位（SPEC §3.7），允许 >100% */
+export const SONG_SPEED_PRESETS = [50, 75, 100, 125] as const;
+
 export const FEELINGS = ["good", "normal", "hard"] as const;
 export type Feeling = (typeof FEELINGS)[number];
 
@@ -45,6 +48,16 @@ export const MUSICXML_EXTENSIONS = [".musicxml", ".xml"] as const;
 export const PDF_EXTENSIONS = [".pdf"] as const;
 
 export const MAX_UPLOAD_BYTES = 32 * 1024 * 1024;
+
+/** SPEC §2.3：Album 标题最大长度。放在 domain 层，便于客户端表单复用。 */
+export const ALBUM_TITLE_MAX = 100;
+
+/**
+ * Creator / OMR 的输入限制（SPEC §4.2）。
+ * 放在 domain 层：客户端表单与服务端校验共用同一份常量。
+ */
+export const MAX_OMR_UPLOAD_BYTES = 20 * 1024 * 1024;
+export const OMR_IMAGE_MIME_TYPES = ["image/png", "image/jpeg"] as const;
 
 export type ScoreFileKind = "gp" | "musicxml" | "pdf";
 

@@ -6,18 +6,28 @@
 
 ## 能做什么
 
-- 导入 Guitar Pro（`.gp` / `.gpx` / `.gp5` / `.gp4` / `.gp3`）和 MusicXML（`.musicxml` / `.xml`）；PDF 作为配套资料查看。
-- 按轨道和起止小节建立练习段落，查看五线谱、TAB 或两者，播放与循环练习。
+- 导入 Guitar Pro（`.gp` / `.gpx` / `.gp5` / `.gp4` / `.gp3`）和 MusicXML（`.musicxml` / `.xml`）；PDF 作为配套资料查看；默认采用谱面标题、作者与 BPM，人工填写优先。
+- 只要有 GP / MusicXML 就能**整曲播放**：不需要先建练习段落，也不会产生练习记录。
+- 用**专辑**整理曲库（`曲库 → 专辑 → 曲目`，一层）；专辑与教材是两个维度，可同时存在，删除专辑不会删除曲目。
+- 曲目列表可一键将整曲加入今日练习；也可按轨道和起止小节建立节选段落，查看五线谱、TAB 或两者。
+- 节选在最后一小节完整结束后停止或回到起点；可开启预备一小节，并单独调节乐谱音量。
 - 调整 BPM、播放速度与节拍器，使用逐档提速训练。
 - 管理今日任务，完成、跳过、延期或按练习频率生成任务。
-- 保存时长、起手/最高/结束 BPM、感受与笔记，在成长页查看练习趋势。
+- 练习计时可暂停和继续，页面离开不累计；保存有效时长、起手/最高/结束 BPM、感受与笔记，在成长页查看练习趋势。
+- **Creator（可选测试功能）**：截图转 MusicXML 草稿，切换谱表、试听和下载；实验性单音“五线谱＋TAB”模式尝试保留原弦号和品位，并显示音高冲突。
 - 提供 PWA manifest 和静态资源缓存；完整练习流程仍需要本地服务运行。
 
 速度与练习成果来自用户记录，不是麦克风自动识别结果。当前没有云端同步、账户登录、制谱编辑器或 PDF 自动识谱。
 
+**Creator 整体仍是实验测试功能，尚未完成充分的真实乐谱泛化与设备验收，不保证识别准确性。** 所有结果都只是草稿，需逐项核对音高、节奏、弦号和品位；不能直接当作已校对乐谱使用。
+
+Creator 的乐谱识别需要本机安装 Python 与 [homr](https://github.com/liebharc/homr)。**没有它们也能正常使用 Guitar Road**，Creator 页面会显示「识别引擎未安装」。
+
+本次合并新增专辑管理、独立整曲播放、整曲加入今日练习、导入元数据默认值、暂停计时、节选范围修复、预备拍与音量控制。完整说明见 [2026-10-03 更新记录](docs/RELEASE_NOTES.md)。
+
 ## 快速开始
 
-需要 **Node.js 22 或更新版本**与 npm。首次安装需要联网，Python 仅用于可选的图标生成。
+需要 **Node.js 22 或更新版本**与 npm。首次安装需要联网，核心练习功能不依赖 Python；Python 用于可选的图标生成和 Creator 测试功能。
 
 ```bash
 git clone https://github.com/zzhiyoung/guitar-road.git
@@ -86,13 +96,46 @@ npm run dev
 | `GUITAR_OWNER_NAME` | 首次创建用户时的显示名称 | `Guitarist` |
 | `GUITAR_OWNER_EMAIL` | 首次创建用户时的邮箱 | 空 |
 | `GUITAR_NEXT_DIST_DIR` | 独立构建输出目录 | `.next` |
+| `GUITAR_ROAD_OMR_PYTHON` | Creator 使用的 Python 解释器 | 依次尝试 `python` / `py` / `python3` |
+| `GUITAR_ROAD_HOMR_CMD` | 覆盖 homr 的调用方式（JSON 数组） | 自动探测 |
+| `GUITAR_ROAD_HOMR_ARGS` | 额外透传给 homr 的参数（JSON 数组） | 无 |
+| `GUITAR_ROAD_OMR_DEVICE` | 推理设备 `auto` / `cpu` / `cuda` | `auto` |
 
 独立输出目录用于开发或预览，启动器只支持默认 `.next`。Owner 配置影响首次创建的用户，不会自动改写已有记录。Node 直接运行的 seed 脚本不会自动加载 `.env.local`；使用自定义路径时需在终端设置环境变量。
+
+## 可选的乐谱识别测试（Creator）
+
+Creator 用于测试「截图 → MusicXML 草稿 → Guitar Pro 校对」流程。它不是正式制谱或可靠自动识谱工具；目前只验证了有限样本，识别失败、漏音、音高或节奏错误都可能发生。请先用少量完整小节试验，并人工校对后再使用。
+
+```bash
+cd tools/omr
+
+# 建议用独立 venv（Python 3.10-3.12），不要把 homr 装进系统环境
+python -m venv .venv
+.venv/Scripts/python -m pip install setuptools wheel poetry-core
+
+.venv/Scripts/python -m pip install -e .
+.venv/Scripts/python -m pip install "homr[cpu]==0.7.0"
+
+.venv/Scripts/python -m guitar_road_omr status     # 验证
+```
+
+然后在项目根目录的 `.env.local` 里指向这个解释器，Creator 才能找到它：
+
+```
+GUITAR_ROAD_OMR_PYTHON=D:/coding/Guitar Road/tools/omr/.venv/Scripts/python.exe
+```
+
+模型权重（约 140 MB）来自 GitHub Releases，国内直连很慢，
+[tools/omr/README.md](tools/omr/README.md) 里有镜像下载与常见问题。
+
+识别图片发送到本机服务，不发送第三方；每次任务使用独立临时目录并在结束后清理。组合谱的实验模式另需 RapidOCR 和预先准备的本地模型，只支持标准 EADGBE、无变调夹的清晰单音片段，拒绝不可靠的对齐；纯 TAB 和复杂奏法尚不支持。识别结果只是草稿，下载后用 Guitar Pro 校正，再从「导入曲谱」加入 Guitar Road。安装和限制见 [tools/omr/README.md](tools/omr/README.md)。
 
 ## 文档与贡献
 
 - [文档索引](docs/README.md)：当前文档与产品规划的边界。
 - [开发说明](docs/DEVELOPMENT.md)：目录、数据模型、alphaTab 集成与验证流程。
+- [OMR sidecar](tools/omr/README.md)：Creator 的可选识别引擎与安装方式。
 - [启动器维护](docs/LAUNCHER.md)：桌面快捷方式、图标、已知限制与三条验收路径。
 - [产品规格](docs/SPEC.md)：初始规划，包含尚未实现的目标。
 - [贡献指南](CONTRIBUTING.md)：修改与提交约定。

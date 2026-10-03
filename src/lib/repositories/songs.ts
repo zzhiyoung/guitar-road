@@ -16,6 +16,13 @@ export interface SongFilter {
   status?: SongStatus;
   type?: "song" | "exercise";
   q?: string;
+  /**
+   * 专辑筛选：
+   * - `undefined` → 不筛选专辑
+   * - `string`    → 只返回该专辑内的曲目
+   * - `null`      → 只返回「未分类」曲目
+   */
+  albumId?: string | null;
 }
 
 export async function listSongs(
@@ -28,6 +35,12 @@ export async function listSongs(
   return rows
     .filter((s) => (filter.status ? s.status === filter.status : true))
     .filter((s) => (filter.type ? s.type === filter.type : true))
+    .filter((s) => {
+      if (filter.albumId === undefined) return true;
+      return filter.albumId === null
+        ? s.albumId === null
+        : s.albumId === filter.albumId;
+    })
     .filter((s) => {
       if (!filter.q) return true;
       const q = filter.q.toLowerCase();
@@ -53,6 +66,7 @@ export async function createSong(input: {
   artist?: string | null;
   type?: "song" | "exercise";
   bookId?: string | null;
+  albumId?: string | null;
   pdfPage?: number | null;
   difficulty?: number | null;
   tags?: string[];
@@ -68,6 +82,7 @@ export async function createSong(input: {
       artist: input.artist?.trim() || null,
       type: input.type ?? "song",
       bookId: input.bookId ?? null,
+      albumId: input.albumId ?? null,
       pdfPage: input.pdfPage ?? null,
       difficulty: input.difficulty ?? null,
       tags: input.tags ?? [],
@@ -87,6 +102,7 @@ export async function updateSong(
       | "artist"
       | "type"
       | "bookId"
+      | "albumId"
       | "pdfPage"
       | "difficulty"
       | "tags"

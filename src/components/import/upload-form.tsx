@@ -79,11 +79,11 @@ export function UploadForm({ songId }: { songId?: string }) {
       {!songId ? (
         <div className="grid gap-2.5 sm:grid-cols-2">
           <label className="block sm:col-span-2">
-            <span className="label">曲目名称（留空则用文件名）</span>
+            <span className="label">曲目名称（留空采用谱面标题，缺失时用文件名）</span>
             <input className="input" name="title" placeholder="Hotel California" />
           </label>
           <label className="block">
-            <span className="label">艺术家 / 教材</span>
+            <span className="label">艺术家 / 作者（留空采用谱面信息）</span>
             <input className="input" name="artist" placeholder="Eagles" />
           </label>
           <label className="block">

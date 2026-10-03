@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AlbumSelector } from "@/components/library/album-selector";
 import {
   BlockEditForm,
   BlockRowActions,
@@ -15,7 +16,7 @@ import { Card, Chip, SectionTitle, StatusBadge } from "@/components/ui";
 import { DIFFICULTY_LABELS, FEELING_META } from "@/lib/domain/constants";
 import { formatDuration } from "@/lib/domain/date";
 import { statusProgress } from "@/lib/domain/song-status";
-import { getCurrentUserId } from "@/lib/repositories";
+import { albumsRepo, getCurrentUserId } from "@/lib/repositories";
 import * as blocksRepo from "@/lib/repositories/blocks";
 import * as notesRepo from "@/lib/repositories/notes";
 import * as scoreFilesRepo from "@/lib/repositories/score-files";
@@ -38,17 +39,18 @@ export default async function SongDetailPage({
   const song = await songsRepo.getSong(userId, songId);
   if (!song) notFound();
 
-  const [blocks, scoreFiles, songNotes] = await Promise.all([
+  const [blocks, scoreFiles, songNotes, albums] = await Promise.all([
     blocksRepo.listBlocksBySong(song.id),
     scoreFilesRepo.listScoreFiles(song.id),
     notesRepo.listNotes("song", song.id),
+    albumsRepo.listAlbums(userId),
   ]);
 
   const storage = getStorage();
   const playable =
     [...scoreFiles]
       .filter((f) => f.fileType === "gp" || f.fileType === "musicxml")
-      .sort((a, b) => b.version - a.version)[0] ?? null;
+      .sort(scoreFilesRepo.latestScoreFirst)[0] ?? null;
 
   const blockDetails = await Promise.all(
     blocks.map(async (block) => {
@@ -100,10 +102,25 @@ export default async function SongDetailPage({
             ))}
           </div>
         </div>
-        <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm btn-accent">
-          + 新建 练习段落
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {playable ? (
+            <Link href={`/play/${song.id}`} className="btn btn-sm btn-accent">
+              ▶ 播放整曲
+            </Link>
+          ) : null}
+          <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm">
+            + 新建练习段落
+          </Link>
+        </div>
       </div>
+
+      <Card className="card-pad">
+        <AlbumSelector
+          songId={song.id}
+          albums={albums.map((a) => ({ id: a.id, title: a.title }))}
+          currentAlbumId={song.albumId}
+        />
+      </Card>
 
       <Card className="card-pad">
         <StatusChanger songId={song.id} current={song.status} />
@@ -143,7 +160,20 @@ export default async function SongDetailPage({
         </SectionTitle>
         {blockDetails.length === 0 ? (
           <Card className="card-pad text-[12.5px] text-muted">
-            还没有 练习段落。用上方表单圈出要攻克的小节范围。
+            <p>还没有练习段落。</p>
+            <p className="mt-1">
+              你可以直接播放整首曲目；需要针对某一段练习时，再创建练习段落。
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {playable ? (
+                <Link href={`/play/${song.id}`} className="btn btn-sm btn-accent">
+                  ▶ 播放整曲
+                </Link>
+              ) : null}
+              <Link href={`/library/${song.id}?setup=1`} className="btn btn-sm">
+                ＋ 新建练习段落
+              </Link>
+            </div>
           </Card>
         ) : (
           <div className="block-grid">
@@ -169,7 +199,7 @@ export default async function SongDetailPage({
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-muted">
                       <span>
-                        第 {item.block.barStart}–{item.block.barEnd} 小节
+                        {item.block.isWholeSong ? "整曲练习 · 全部小节" : `第 ${item.block.barStart}–${item.block.barEnd} 小节`}
                       </span>
                       <span>
                         <strong className="text-ink">{item.block.currentBpm}</strong>
@@ -208,6 +238,7 @@ export default async function SongDetailPage({
                         name: item.block.name,
                         barStart: item.block.barStart,
                         barEnd: item.block.barEnd,
+                        isWholeSong: item.block.isWholeSong,
                         currentBpm: item.block.currentBpm,
                         targetBpm: item.block.targetBpm,
                         note: item.block.note,

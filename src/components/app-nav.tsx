@@ -10,10 +10,12 @@ const NAV: { href: string; label: string; short: string; icon: IconName }[] = [
   { href: "/library", label: "我的曲库", short: "曲库", icon: "library" },
   { href: "/dashboard", label: "成长足迹", short: "成长", icon: "chart" },
   { href: "/import", label: "导入曲谱", short: "导入", icon: "upload" },
+  { href: "/creator", label: "Creator（测试）", short: "识别·测试", icon: "star" },
 ];
 export function AppFrame({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const practice = pathname.startsWith("/practice/");
+  // 练习页与整曲播放页都隐侧边栏，把横向空间全部留给谱面
+  const practice = pathname.startsWith("/practice/") || pathname.startsWith("/play/");
   return <div className={`app-shell ${practice ? "is-practice" : ""}`}>
     <a href="#main-content" className="skip-link">跳到主要内容</a>
     <aside className="app-sidebar no-print">
