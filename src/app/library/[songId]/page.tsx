@@ -50,7 +50,7 @@ export default async function SongDetailPage({
   const playable =
     [...scoreFiles]
       .filter((f) => f.fileType === "gp" || f.fileType === "musicxml")
-      .sort((a, b) => b.version - a.version)[0] ?? null;
+      .sort(scoreFilesRepo.latestScoreFirst)[0] ?? null;
 
   const blockDetails = await Promise.all(
     blocks.map(async (block) => {
@@ -199,7 +199,7 @@ export default async function SongDetailPage({
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px] text-muted">
                       <span>
-                        第 {item.block.barStart}–{item.block.barEnd} 小节
+                        {item.block.isWholeSong ? "整曲练习 · 全部小节" : `第 ${item.block.barStart}–${item.block.barEnd} 小节`}
                       </span>
                       <span>
                         <strong className="text-ink">{item.block.currentBpm}</strong>
@@ -238,6 +238,7 @@ export default async function SongDetailPage({
                         name: item.block.name,
                         barStart: item.block.barStart,
                         barEnd: item.block.barEnd,
+                        isWholeSong: item.block.isWholeSong,
                         currentBpm: item.block.currentBpm,
                         targetBpm: item.block.targetBpm,
                         note: item.block.note,

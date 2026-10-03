@@ -16,6 +16,7 @@ export interface TaskCardData {
   artist: string | null;
   barStart: number;
   barEnd: number;
+  isWholeSong: boolean;
   currentBpm: number;
   targetBpm: number;
   targetDurationMin: number | null;
@@ -77,7 +78,7 @@ export function TaskCard({ data }: { data: TaskCardData }) {
       </div>
     </div>
     <div className="task-meta">
-      <span className="chip">第 {data.barStart}–{data.barEnd} 小节</span>
+      <span className="chip">{data.isWholeSong ? "整曲练习 · 全部小节" : `第 ${data.barStart}–${data.barEnd} 小节`}</span>
       {data.targetDurationMin ? <span className="chip">目标 {formatDuration(data.targetDurationMin)}</span> : null}
       {data.source === "auto" ? <span className="chip">按频率安排</span> : null}
       {data.deferredCount >= 2 ? <span className="chip border-warn/30 bg-warn-soft text-warn">已顺延 {data.deferredCount} 次</span> : null}

@@ -16,8 +16,8 @@ export default async function CreatorPage() {
   return (
     <div>
       <PageHeading
-        title="把乐谱变成可以继续编辑的数字乐谱。"
-        hint="截图 → 识别 → MusicXML → alphaTab 预览 → 下载 → Guitar Pro 校正"
+        title="Creator · 乐谱识别测试"
+        hint="这是一项实验测试功能，识别结果仅供校对，准确性与复杂乐谱支持尚未充分验证。请用 Guitar Pro 核对后再导入曲库。"
       />
       <CreatorClient initialStatus={status} />
     </div>

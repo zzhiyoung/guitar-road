@@ -5,6 +5,11 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUserId } from "@/lib/repositories";
 import * as blocksRepo from "@/lib/repositories/blocks";
 import * as tasksRepo from "@/lib/repositories/tasks";
+import * as songsRepo from "@/lib/repositories/songs";
+import * as scoreFilesRepo from "@/lib/repositories/score-files";
+import { scheduleWholeSong } from "@/lib/repositories/whole-song";
+import { readScoreSummary } from "@/lib/alphatab/server-score";
+import { getStorage } from "@/lib/storage";
 import { addDaysKey, isDateKey, todayKey, weekStartKey } from "@/lib/domain/date";
 import {
   errorState,
@@ -17,6 +22,19 @@ import {
 
 function refresh() {
   revalidatePath("/", "layout");
+}
+
+export async function addWholeSongToTodayAction(songId: string): Promise<FormState> {
+  const userId = await getCurrentUserId();
+  if (!await songsRepo.getSong(userId, songId)) return errorState("曲目不存在");
+  const file = (await scoreFilesRepo.listPlayableBySongs([songId])).get(songId);
+  if (!file) return errorState("请先上传可播放的乐谱");
+  try {
+    const summary = readScoreSummary(await getStorage().read(file.storagePath));
+    const result = scheduleWholeSong({ userId, songId, barCount: summary.barCount, tempo: summary.tempo, date: todayKey() });
+    refresh();
+    return okState(result.alreadyScheduled ? "整曲已在今日练习中" : "已加入今日练习，并保存“整曲练习”段落");
+  } catch { return errorState("无法读取乐谱，请重新上传有效的曲谱后再试。"); }
 }
 
 /** SPEC §5.8 K-1 / K-3：手工创建任务 */

@@ -2,6 +2,7 @@
 
 import { useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import type * as alphaTabNS from "@coderline/alphatab";
+import { CountIn } from "@/lib/audio/count-in";
 
 import {
   alphaTabAssets,
@@ -15,6 +16,7 @@ import {
   locateTick,
   STAVE_VIEW_LABEL,
   summarizeScore,
+  withLinearPracticePlayback,
   type BarTiming,
   type ScoreSummary,
   type StaveView,
@@ -63,12 +65,19 @@ export interface ScorePlayerProps {
   loop?: boolean;
   /** 播放速度倍率，1 = 原速 */
   playbackSpeed?: number;
+  /** Pre-roll follows the starting bar's meter/tempo on the WebAudio clock. */
+  countIn?: boolean;
   defaultStaveView?: StaveView;
+  /** Creator 的已对齐 TAB 文件需要把标准谱表恢复为五线；仅按调用方请求应用。 */
+  normalizeGuitarStaff?: boolean;
+  allowedStaveViews?: StaveView[];
   onScoreLoaded?(info: { summary: ScoreSummary; timings: BarTiming[] }): void;
   onPlayerReadyChange?(ready: boolean): void;
   onPlayerStateChange?(playing: boolean): void;
   onPositionChange?(position: ScorePlayerPosition): void;
   onRangeChange?(range: { startTick: number; endTick: number } | null): void;
+  onLoopCompleted?(): void;
+  onCountInChange?(preparing: boolean): void;
   /** 谱面区下方（同一张 card 内）的附加内容，例如 Practice 的 PDF 行 */
   children?: ReactNode;
   /** 谱面解析失败时浮层里的补救入口（例如「重新导入」） */
@@ -84,12 +93,17 @@ export function ScorePlayer({
   barRange = null,
   loop = false,
   playbackSpeed = 1,
+  countIn = false,
   defaultStaveView = "scoreTab",
+  normalizeGuitarStaff = false,
+  allowedStaveViews,
   onScoreLoaded,
   onPlayerReadyChange,
   onPlayerStateChange,
   onPositionChange,
   onRangeChange,
+  onLoopCompleted,
+  onCountInChange,
   children,
   errorAction,
 }: ScorePlayerProps) {
@@ -102,12 +116,21 @@ export function ScorePlayer({
   const appliedViewRef = useRef<StaveView | null>(null);
   const activeTrackRef = useRef<number>(source?.trackIndex ?? 0);
   const rangeRef = useRef<{ startTick: number; endTick: number } | null>(null);
+  const countInUsedRef = useRef(false);
+  const countInRef = useRef<CountIn | null>(null);
+  const preparingRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>(source ? "loading" : "ready");
   const [phaseMessage, setPhaseMessage] = useState("");
   const [summary, setSummary] = useState<ScoreSummary | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
+  const [midiRevision, setMidiRevision] = useState(0);
+  const [volume, setVolume] = useState(1.5);
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+  const playbackConfigRef = useRef({ barRange, loop, playbackSpeed, countIn });
+  playbackConfigRef.current = { barRange, loop, playbackSpeed, countIn };
   const [positionBar, setPositionBar] = useState<number | null>(null);
   const [staveView, setStaveView] = useState<StaveView>(defaultStaveView);
 
@@ -118,6 +141,8 @@ export function ScorePlayer({
     onPlayerStateChange,
     onPositionChange,
     onRangeChange,
+    onLoopCompleted,
+    onCountInChange,
   });
   callbacksRef.current = {
     onScoreLoaded,
@@ -125,6 +150,8 @@ export function ScorePlayer({
     onPlayerStateChange,
     onPositionChange,
     onRangeChange,
+    onLoopCompleted,
+    onCountInChange,
   };
   const loopRef = useRef(loop);
   loopRef.current = loop;
@@ -136,6 +163,16 @@ export function ScorePlayer({
     if (!source) return;
     let disposed = false;
     let api: alphaTabNS.AlphaTabApi | null = null;
+    let practiceMidiPrepared = false;
+    let practiceMidiLoaded = false;
+    setPhase("loading");
+    setPlayerReady(false);
+    setPositionBar(null);
+    timingsRef.current = [];
+    rangeRef.current = null;
+    prevTickRef.current = -1;
+    countInUsedRef.current = false;
+    callbacksRef.current.onPlayerReadyChange?.(false);
 
     (async () => {
       try {
@@ -164,9 +201,25 @@ export function ScorePlayer({
           },
         });
         apiRef.current = api;
+        api.masterVolume = volumeRef.current;
+
+        api.midiLoaded.on(() => {
+          if (disposed) return;
+          // scoreLoaded precedes async MIDI loading. Loading MIDI resets its range;
+          // install the practice MIDI first, then reapply the range after loading.
+          if (mode === "practice" && !practiceMidiPrepared && api!.score) {
+            practiceMidiPrepared = true;
+            setPlayerReady(false);
+            callbacksRef.current.onPlayerReadyChange?.(false);
+            withLinearPracticePlayback(api!.score, () => api!.loadMidiForScore());
+            return;
+          }
+          practiceMidiLoaded = true;
+          setMidiRevision((revision) => revision + 1);
+        });
 
         api.playerReady.on(() => {
-          if (disposed) return;
+          if (disposed || (mode === "practice" && !practiceMidiLoaded)) return;
           setPlayerReady(true);
           callbacksRef.current.onPlayerReadyChange?.(true);
         });
@@ -182,6 +235,13 @@ export function ScorePlayer({
 
         api.scoreLoaded.on((score) => {
           if (disposed) return;
+          if (normalizeGuitarStaff) {
+            for (const track of score.tracks) {
+              for (const staff of track.staves) {
+                if (staff.tuning.length === 6) staff.standardNotationLineCount = 5;
+              }
+            }
+          }
           const timings = barTimings(score);
           timingsRef.current = timings;
 
@@ -216,6 +276,12 @@ export function ScorePlayer({
           callbacksRef.current.onPlayerStateChange?.(playing);
         });
 
+        api.playerFinished.on(() => {
+          if (disposed) return;
+          if (loopRef.current) callbacksRef.current.onLoopCompleted?.();
+          else countInUsedRef.current = false;
+        });
+
         api.playerPositionChanged.on((args) => {
           if (disposed) return;
           const tick = args.currentTick;
@@ -245,6 +311,9 @@ export function ScorePlayer({
 
     return () => {
       disposed = true;
+      countInRef.current?.dispose();
+      countInRef.current = null;
+      preparingRef.current = false;
       try {
         api?.destroy();
       } catch {
@@ -252,7 +321,7 @@ export function ScorePlayer({
       }
       apiRef.current = null;
     };
-  }, [source?.id, source?.url, source?.trackIndex]);
+  }, [source?.id, source?.url, source?.trackIndex, normalizeGuitarStaff, mode]);
 
   // ---------------------------------------------------------------------
   // 对外暴露的命令式接口
@@ -261,8 +330,59 @@ export function ScorePlayer({
     ref,
     () => ({
       getApi: () => apiRef.current,
-      playPause: () => apiRef.current?.playPause(),
-      stop: () => apiRef.current?.stop(),
+      playPause: () => {
+        const api = apiRef.current;
+        if (!api || !api.isReadyForPlayback) return;
+        const config = playbackConfigRef.current;
+        const range = rangeRef.current;
+        if (preparingRef.current) {
+          countInRef.current?.cancel();
+          preparingRef.current = false;
+          countInUsedRef.current = false;
+          callbacksRef.current.onCountInChange?.(false);
+          return;
+        }
+        // A click/drag on the score may change alphaTab's own selection.
+        // The practice block remains the authoritative playback boundary.
+        api.playbackRange = range;
+        api.isLooping = config.loop;
+        if (api.playerState !== 1) {
+          if (range && (api.tickPosition < range.startTick || api.tickPosition >= range.endTick)) {
+            api.tickPosition = range.startTick;
+          }
+          const needsCountIn = config.countIn && !countInUsedRef.current && Math.abs(api.tickPosition - (range?.startTick ?? 0)) < 10;
+          countInUsedRef.current = true;
+          // Native count-in can retain the previous meter at an exact bar boundary.
+          // Read the score directly and schedule this one measure independently.
+          if (needsCountIn && api.score) {
+            const barIndex = (locateTick(timingsRef.current, api.tickPosition)?.bar ?? 1) - 1;
+            const bar = api.score.masterBars[barIndex];
+            let tempo = api.score.tempo;
+            for (let i = 0; i <= barIndex; i++) {
+              for (const automation of api.score.masterBars[i].tempoAutomations) {
+                if (i < barIndex || automation.ratioPosition === 0) tempo = automation.value;
+              }
+            }
+            preparingRef.current = true;
+            callbacksRef.current.onCountInChange?.(true);
+            countInRef.current ??= new CountIn();
+            void countInRef.current.start({ bpm: tempo * config.playbackSpeed,
+              numerator: bar.timeSignatureNumerator, denominator: bar.timeSignatureDenominator, volume: 0.6 }, () => {
+              preparingRef.current = false;
+              callbacksRef.current.onCountInChange?.(false);
+              if (apiRef.current === api) { api.countInVolume = 0; api.playPause(); }
+            });
+            return;
+          }
+        }
+        api.countInVolume = 0;
+        api.playPause();
+      },
+      stop: () => {
+        countInRef.current?.cancel(); preparingRef.current = false;
+        callbacksRef.current.onCountInChange?.(false);
+        countInUsedRef.current = false; apiRef.current?.stop();
+      },
       setTickPosition: (tick: number) => {
         const api = apiRef.current;
         if (api) api.tickPosition = tick;
@@ -304,12 +424,21 @@ export function ScorePlayer({
     } catch {
       /* 播放器未就绪时忽略 */
     }
-  }, [playbackSpeed, phase]);
+  }, [playbackSpeed, phase, midiRevision, playerReady]);
+
+  useEffect(() => { if (apiRef.current) apiRef.current.masterVolume = volume; }, [volume, midiRevision]);
 
   // ---------------------------------------------------------------------
   // 播放区间与循环
   // ---------------------------------------------------------------------
   const rangeKey = barRange ? `${barRange.start}:${barRange.end}` : "";
+  useEffect(() => {
+    if (!preparingRef.current) return;
+    countInRef.current?.cancel();
+    preparingRef.current = false;
+    countInUsedRef.current = false;
+    callbacksRef.current.onCountInChange?.(false);
+  }, [countIn, playbackSpeed, rangeKey]);
   useEffect(() => {
     const api = apiRef.current;
     const timings = timingsRef.current;
@@ -322,13 +451,15 @@ export function ScorePlayer({
         api.playbackRange = { startTick: next.startTick, endTick: next.endTick };
         api.isLooping = loopRef.current;
       } else {
-        api.isLooping = false;
+        api.playbackRange = null;
+        api.isLooping = loopRef.current;
       }
+      if (next && (api.tickPosition < next.startTick || api.tickPosition >= next.endTick)) api.tickPosition = next.startTick;
     } catch {
       /* 忽略 */
     }
     callbacksRef.current.onRangeChange?.(next);
-  }, [phase, rangeKey, loop]);
+  }, [phase, rangeKey, loop, midiRevision, playerReady]);
 
   const barCount = summary?.barCount ?? null;
 
@@ -337,7 +468,7 @@ export function ScorePlayer({
       {source && phase === "ready" ? (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-3 py-2">
           <span className="text-[12px] font-semibold text-muted">谱表</span>
-          {(Object.keys(STAVE_VIEW_LABEL) as StaveView[]).map((v) => (
+          {(allowedStaveViews ?? Object.keys(STAVE_VIEW_LABEL) as StaveView[]).map((v) => (
             <button
               key={v}
               type="button"
@@ -348,13 +479,20 @@ export function ScorePlayer({
               {STAVE_VIEW_LABEL[v]}
             </button>
           ))}
+          <label className="flex items-center gap-2 text-[12px] text-muted">
+            乐谱音量
+            <input type="range" min={0} max={300} step={10} value={Math.round(volume * 100)}
+              onChange={(e) => setVolume(Number(e.target.value) / 100)} aria-label="乐谱音量"
+              className="w-24" />
+            <span className="w-9 tabular-nums">{Math.round(volume * 100)}%</span>
+          </label>
           {positionBar ? (
             <span className="chip ml-auto">当前第 {positionBar} 小节</span>
           ) : null}
           {!positionBar && barCount ? (
             <span className="chip ml-auto">共 {barCount} 小节</span>
           ) : null}
-          {mode === "practice" && loop && positionBar ? (
+          {mode === "practice" && loop && isPlaying && positionBar ? (
             <span className="chip">循环播放中</span>
           ) : null}
         </div>

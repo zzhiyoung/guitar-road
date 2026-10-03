@@ -18,13 +18,14 @@ alphaTab source is available from [the upstream repository](https://github.com/C
 
 Guitar Road Creator can call an optional, locally installed OMR engine to turn sheet-music
 screenshots into MusicXML drafts. **No OMR engine, model, or Python package is vendored or
-redistributed with this repository.** `tools/omr/` contains only a thin Python wrapper that
-shells out to whatever the user installed themselves; it declares no hard dependency on
+redistributed with this repository.** `tools/omr/` contains Python engine adapters and an
+experimental TAB inspector using locally installed dependencies; it declares no hard dependency on
 `homr`, PyTorch, or OpenCV.
 
 | Component | Upstream | License | Distribution |
 |---|---|---|---|
 | `homr` (optional, user-installed) | [liebharc/homr](https://github.com/liebharc/homr) | see upstream repository | Not bundled — installed by the user via `uvx` / `pip`, see [tools/omr/README.md](tools/omr/README.md) |
+| `RapidOCR` 3.9.2 (optional, experimental TAB inspector) | [RapidAI/RapidOCR](https://github.com/RapidAI/RapidOCR) | Apache-2.0 (installed package metadata) | Not bundled; locally installed Python dependency. No OCR model weights are distributed by this repository. |
 
 If you redistribute a build that bundles an OMR engine, add that engine's own notices and
 license text here. Core Guitar Road (Next.js + Node.js) never requires Python.

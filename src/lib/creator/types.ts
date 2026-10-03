@@ -8,6 +8,8 @@ export interface OmrStatus {
   device?: string;
 }
 
+export type OmrInputMode = "auto" | "standard" | "standard-tab";
+
 export interface OmrSuccess {
   ok: true;
   /** MusicXML 文本。不返回任何服务器绝对路径（SPEC §4.13） */

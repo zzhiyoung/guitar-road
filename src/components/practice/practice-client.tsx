@@ -20,7 +20,7 @@ import {
   type ScorePlayerPosition,
 } from "@/components/player/score-player";
 import { Metronome } from "@/lib/audio/metronome";
-import type { BarTiming } from "@/lib/alphatab/score-utils";
+import { usePracticeClock } from "@/lib/audio/use-practice-clock";
 import {
   BPM_MAX,
   BPM_MIN,
@@ -55,6 +55,7 @@ export interface PracticePageData {
     targetBpm: number;
     defaultBpm: number;
     defaultLoop: boolean;
+    isWholeSong: boolean;
     note: string | null;
     speedTrainingConfig: {
       start: number;
@@ -94,11 +95,8 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   const { block, song, scoreFile } = data;
 
   const playerRef = useRef<ScorePlayerHandle>(null);
-  const timingsRef = useRef<BarTiming[]>([]);
   const rangeRef = useRef<{ startTick: number; endTick: number } | null>(null);
-  const lastBeatKeyRef = useRef<number>(-1);
   const metroRef = useRef<Metronome | null>(null);
-  const metroOnRef = useRef(false);
   const bpmRef = useRef(block.currentBpm);
   const playbackStartTickRef = useRef(0);
   const playbackStartingRef = useRef(false);
@@ -120,12 +118,16 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   const [bpm, setBpm] = useState(block.currentBpm);
   const [scoreTempo, setScoreTempo] = useState<number>(0);
   const [loopEnabled, setLoopEnabled] = useState(block.defaultLoop);
+  const [countIn, setCountIn] = useState(false);
+  const [preparing, setPreparing] = useState(false);
+  const [barCount, setBarCount] = useState(block.barEnd);
   const [metroOn, setMetroOn] = useState(false);
   const [metroVolume, setMetroVolume] = useState(0.6);
   const [beatsPerBar, setBeatsPerBar] = useState(4);
   const [accentFirst, setAccentFirst] = useState(true);
   const [positionBar, setPositionBar] = useState<number | null>(null);
-  const [seconds, setSeconds] = useState(0);
+  const clock = usePracticeClock(`guitar-practice-clock:${data.today}:${block.id}`);
+  const { seconds } = clock;
   const [bestThisSession, setBestThisSession] = useState(block.currentBpm);
   const [trainer, setTrainer] = useState<TrainerState>(trainerRef.current);
   const [sessionOpen, setSessionOpen] = useState(false);
@@ -141,19 +143,10 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     setBestThisSession((prev) => (bpm > prev ? bpm : prev));
   }, [bpm]);
 
-  useEffect(() => {
-    metroOnRef.current = metroOn;
-  }, [metroOn]);
-
   // ---------------------------------------------------------------------
   // 练习计时（P-7）：进入页面自动开始；页面不可见时暂停，避免挂机虚增时长
   // ---------------------------------------------------------------------
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") setSeconds((s) => s + 1);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const openSession = () => { playerRef.current?.stop(); clock.setPaused(true); setSessionOpen(true); };
 
   // ---------------------------------------------------------------------
   // 速度训练（B-4 / B-5）
@@ -206,36 +199,20 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
 
       if (p.bar) setPositionBar(p.bar);
 
-      if (
-        metroOnRef.current &&
-        metroRef.current?.isFollowingPlayback &&
-        timingsRef.current.length > 0
-      ) {
-        const key = (p.bar ?? 0) * 100 + (p.beat ?? 0);
-        if (key !== lastBeatKeyRef.current) {
-          if (lastBeatKeyRef.current !== -1) {
-            metroRef.current?.triggerBeat(p.beat ?? 0);
-          }
-          lastBeatKeyRef.current = key;
-        }
-      }
+      // During playback the native metronome shares alphaTab's audio clock.
 
-      // 速度训练：识别「完整 Loop 一遍」
-      const range = rangeRef.current;
-      if (range && trainerRef.current.active && p.previousTick >= 0) {
-        const wrapped =
-          p.previousTick > p.tick &&
-          p.tick <= range.startTick + 10 &&
-          p.previousTick >= range.endTick - 480;
-        if (wrapped) onLoopCompleted();
-      }
     },
-    [onLoopCompleted],
+    [],
   );
 
   const handlePlayerState = useCallback((playing: boolean) => {
     setIsPlaying(playing);
-    if (!playing) lastBeatKeyRef.current = -1;
+    playbackStartingRef.current = false;
+    setPlaybackStarting(false);
+    if (!playing) {
+      playbackStartingRef.current = false;
+      setPlaybackStarting(false);
+    }
   }, []);
 
   const startTrainer = () => {
@@ -282,10 +259,13 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
   useEffect(() => {
     const metro = metroRef.current;
     if (!metro) return;
-    if (metroOn && !isPlaying) void metro.start();
+    const api = playerRef.current?.getApi();
+    if (api) api.metronomeVolume = metroOn && isPlaying ? metroVolume : 0;
+    if (preparing) metro.stop();
+    else if (metroOn && !isPlaying) void metro.start();
     else if (!metroOn) metro.stop();
     else if (metroOn && isPlaying) metro.enterFollowMode();
-  }, [metroOn, isPlaying]);
+  }, [metroOn, isPlaying, metroVolume, playerReady, preparing]);
 
   useEffect(() => () => metroRef.current?.dispose(), []);
 
@@ -297,9 +277,10 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     if (!player || !player.readyForPlayback() || playbackStartingRef.current) {
       return;
     }
+    if (preparing) { player.stop(); return; }
     await metroRef.current?.unlock();
 
-    if (!isPlaying && rangeRef.current && loopEnabled) {
+    if (!isPlaying && rangeRef.current) {
       const { startTick, endTick } = rangeRef.current;
       const current = player.getTickPosition();
       if (current < startTick || current >= endTick) {
@@ -316,7 +297,7 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
 
   const stopPlayback = () => {
     const player = playerRef.current;
-    if (!player || playbackStartingRef.current) return;
+    if (!player) return;
     player.stop();
     if (rangeRef.current) player.setTickPosition(rangeRef.current.startTick);
   };
@@ -330,12 +311,13 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
     [bpm, scoreTempo],
   );
 
-  const elapsedMinutes = Math.max(1, Math.round(seconds / 60));
+  const elapsedMinutes = Math.max(0, Math.round(seconds / 60));
   const todayBest = Math.max(bestThisSession, block.currentBpm);
 
   // 表单提交成功后跳转（服务端返回 redirectTo）
   useEffect(() => {
     if (formState.status === "ok" && formState.redirectTo) {
+      clock.clear();
       router.push(formState.redirectTo);
     }
   }, [formState, router]);
@@ -346,9 +328,9 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
         <div className="min-w-0">
           <nav className="flex flex-wrap gap-2 text-[12px] text-muted" aria-label="练习位置"><Link href="/" className="inline-flex min-h-11 items-center hover:text-accent">‹ 今日练习</Link><span className="flex items-center">/</span><Link href={`/library/${song.id}`} className="inline-flex min-h-11 items-center hover:text-accent">{song.title}{song.artist ? ` · ${song.artist}` : ""}</Link></nav>
           <h1 className="break-words">{block.name}</h1>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted"><span className="chip">第 {block.barStart}–{block.barEnd} 小节</span><span>原速 {scoreTempo || "—"} BPM · 目标 {block.targetBpm} BPM</span>{data.personalBestBpm ? <span>· 历史最高 {data.personalBestBpm} BPM</span> : null}</div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-muted"><span className="chip">{block.isWholeSong ? `整曲 · 共 ${barCount} 小节` : `第 ${block.barStart}–${block.barEnd} 小节`}</span><span>原速 {scoreTempo || "—"} BPM · 目标 {block.targetBpm} BPM</span>{data.personalBestBpm ? <span>· 历史最高 {data.personalBestBpm} BPM</span> : null}</div>
         </div>
-        <div className="practice-top-actions"><span className="chip border-transparent bg-good-soft text-good"><Icon name="clock" width="15" />已停留 {formatDuration(elapsedMinutes)}</span><button type="button" className="btn btn-accent" onClick={() => setSessionOpen(true)}>结束并记录</button></div>
+        <div className="practice-top-actions"><span className="chip border-transparent bg-good-soft text-good" role="timer"><Icon name="clock" width="15" />{clock.paused ? "计时已暂停" : "练习计时中"} · {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span><button type="button" className="btn btn-sm" aria-pressed={clock.paused} onClick={() => clock.setPaused(!clock.paused)}>{clock.paused ? "继续计时" : "暂停计时"}</button><button type="button" className="btn btn-accent" onClick={openSession}>结束并记录</button></div>
       </header>
 
       {/* ---------------- 乐谱区（P-2） ----------------
@@ -357,11 +339,12 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
         ref={playerRef}
         source={scoreFile}
         mode="practice"
-        barRange={{ start: block.barStart, end: block.barEnd }}
+        barRange={{ start: block.isWholeSong ? 1 : block.barStart, end: block.isWholeSong ? barCount : block.barEnd }}
         loop={loopEnabled}
+        countIn={countIn}
         playbackSpeed={scoreTempo > 0 ? Math.min(4, Math.max(0.1, bpm / scoreTempo)) : 1}
-        onScoreLoaded={({ summary, timings }) => {
-          timingsRef.current = timings;
+        onScoreLoaded={({ summary }) => {
+          setBarCount(summary.barCount);
           setScoreTempo(summary.tempo);
           setBeatsPerBar(summary.initialTimeSignature.numerator);
           setScoreReady(true);
@@ -369,6 +352,12 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
         onPlayerReadyChange={setPlayerReady}
         onPlayerStateChange={handlePlayerState}
         onPositionChange={handlePosition}
+        onLoopCompleted={onLoopCompleted}
+        onCountInChange={(active) => {
+          setPreparing(active);
+          playbackStartingRef.current = false;
+          setPlaybackStarting(false);
+        }}
         onRangeChange={(range) => {
           rangeRef.current = range;
         }}
@@ -402,10 +391,11 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
       <section className="card card-pad practice-transport" aria-label="播放与练习速度">
         <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-5">
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className="btn btn-accent btn-icon !h-14 !w-14 !rounded-full" onClick={togglePlay} disabled={!scoreReady || !playerReady || playbackStarting} aria-label={playbackStarting ? "正在启动播放" : isPlaying ? "暂停" : "播放"}><Icon name={isPlaying ? "pause" : "play"} width="24" /></button>
+            <button type="button" className="btn btn-accent btn-icon !h-14 !w-14 !rounded-full" onClick={togglePlay} disabled={!scoreReady || !playerReady || playbackStarting} aria-label={preparing ? "取消预备" : playbackStarting ? "正在启动播放" : isPlaying ? "暂停" : "播放"}><Icon name={isPlaying ? "pause" : "play"} width="24" /></button>
             <button type="button" className="btn btn-icon" onClick={stopPlayback} disabled={!scoreReady || !playerReady || playbackStarting} aria-label="停止"><Icon name="stop" width="18" /></button>
             <button type="button" className={`btn btn-sm ${loopEnabled ? "btn-accent" : ""}`} onClick={() => setLoopEnabled(v => !v)} disabled={!scoreReady} aria-pressed={loopEnabled} title="按练习段落的小节范围循环"><Icon name="loop" width="18" />循环{loopEnabled ? "开启" : "关闭"}</button>
             <button type="button" className={`btn btn-sm ${metroOn ? "btn-accent" : ""}`} onClick={() => { void metroRef.current?.unlock(); setMetroOn(v => !v); }} aria-pressed={metroOn}>节拍器{metroOn ? "开启" : "关闭"}</button>
+            <button type="button" className={`btn btn-sm ${countIn ? "btn-accent" : ""}`} onClick={() => setCountIn(v => !v)} aria-pressed={countIn} title="从练习起点播放前预备一小节；暂停后继续和循环不重复预备">预备一小节{countIn ? "开启" : "关闭"}</button>
           </div>
           <div>
             <label className="label" htmlFor="practice-bpm">练习速度</label>
@@ -556,7 +546,7 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
           <button
             type="button"
             className="btn btn-accent ml-auto"
-            onClick={() => setSessionOpen(true)}
+            onClick={openSession}
           >
             完成本次练习
           </button>
@@ -640,7 +630,7 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
               </button>
             </div>
             <p className="mt-1 text-[12.5px] text-muted">
-              页面停留 {formatDuration(elapsedMinutes)} · 最高练习速度 {todayBest} BPM，请核对实际练习时长和完成情况。
+              有效练习 {formatDuration(elapsedMinutes)}（计时已暂停） · 最高练习速度 {todayBest} BPM，请核对实际练习时长和完成情况。
             </p>
 
             <form action={formAction} className="mt-6 space-y-5">
@@ -657,7 +647,7 @@ export function PracticeClient({ data }: { data: PracticePageData }) {
                     className="input"
                     type="number"
                     name="durationMin"
-                    min={1}
+                    min={0}
                     defaultValue={elapsedMinutes}
                     required
                   />

@@ -165,6 +165,8 @@ export const practiceBlocks = sqliteTable(
       .notNull()
       .references(() => songs.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /** Explicit whole-song practice; follows the latest playable file's full range. */
+    isWholeSong: integer("is_whole_song", { mode: "boolean" }).notNull().default(false),
     barStart: integer("bar_start").notNull().default(1),
     barEnd: integer("bar_end").notNull().default(1),
     /** Session 的派生缓存，事实来源永远是 practice_sessions */

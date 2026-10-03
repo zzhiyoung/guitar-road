@@ -27,7 +27,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
     const latest = await sessionsRepo.latestSessionByBlock(block.id);
     suggestions.push({
       taskId: "", blockId: block.id, blockName: block.name, songId: song.id, songTitle: song.title, artist: song.artist,
-      barStart: block.barStart, barEnd: block.barEnd, currentBpm: block.currentBpm, targetBpm: block.targetBpm,
+      barStart: block.barStart, barEnd: block.barEnd, isWholeSong: block.isWholeSong, currentBpm: block.currentBpm, targetBpm: block.targetBpm,
       targetDurationMin: null, status: "todo", source: "manual", deferredCount: 0,
       recommendedStartBpm: latest?.bestBpm ?? latest?.finalBpm ?? block.currentBpm, lastSession: null, sessionCount: 0,
     });
@@ -35,7 +35,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   }
   const taskData = data.items.map(({ task, block, song, recommendedStartBpm, latestSession, sessionCount }): TaskCardData => ({
     taskId: task.id, blockId: block.id, blockName: block.name, songId: song.id, songTitle: song.title, artist: song.artist,
-    barStart: block.barStart, barEnd: block.barEnd, currentBpm: block.currentBpm, targetBpm: task.targetBpm ?? block.targetBpm,
+    barStart: block.barStart, barEnd: block.barEnd, isWholeSong: block.isWholeSong, currentBpm: block.currentBpm, targetBpm: task.targetBpm ?? block.targetBpm,
     targetDurationMin: task.targetDurationMin, status: task.status, source: task.source, deferredCount: task.deferredCount,
     recommendedStartBpm, sessionCount,
     lastSession: latestSession ? { date: latestSession.date, bestBpm: latestSession.bestBpm, finalBpm: latestSession.finalBpm, durationMin: latestSession.durationMin, feeling: latestSession.feeling } : null,
@@ -54,7 +54,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         <h2 id="next-practice-heading" className="serif-heading">{firstVisit ? <>让喜欢的音乐，<br />慢慢变成你的声音。</> : next ? "从熟悉的一段，进入状态。" : data.totalCount > 0 && data.doneCount === data.totalCount ? "今天的小目标，已经完成。" : "从一小段，开始今天的音乐。"}</h2>
         {next ? <>
           <p className="!text-[15px]">{next.songTitle} · {next.blockName}</p>
-          <p className="mt-2">第 {next.barStart}–{next.barEnd} 小节 · 建议起手 {next.recommendedStartBpm} BPM{next.targetDurationMin ? ` · 目标 ${next.targetDurationMin} 分钟` : ""}</p>
+          <p className="mt-2">{next.isWholeSong ? "整曲练习" : `第 ${next.barStart}–${next.barEnd} 小节`} · 建议起手 {next.recommendedStartBpm} BPM{next.targetDurationMin ? ` · 目标 ${next.targetDurationMin} 分钟` : ""}</p>
         </> : <p>{firstVisit ? "导入一份喜欢的曲谱，选择一小段，从舒服的速度开始。" : "想再弹一点，或为下一次练习挑一首喜欢的曲子？"}</p>}
         <div className="hero-actions"><Link href={next ? `/practice/${next.blockId}` : firstVisit ? "/import" : "/library"} className="btn btn-accent">{next ? "开始这段练习" : firstVisit ? "导入第一份曲谱" : "去曲库看看"}<Icon name="arrow" width="18" /></Link><span>{next ? "接着自己的节奏来" : "一次专注一小段"}</span></div>
       </div><GuitarIllustration className="hero-guitar" />
@@ -64,7 +64,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         <SectionTitle action={<AutoTasksButton hasFrequentBlocks={frequent} />}>今天的练习</SectionTitle>
         {taskData.length > 0 ? <div className="mt-4 space-y-3">{taskData.map(item => <TaskCard key={item.taskId} data={item} />)}</div> : <div className="card card-pad mt-4"><h3 className="font-semibold">今天还没有安排任务</h3><p className="mt-2 text-[13px] leading-relaxed text-muted">可以从下面的段落直接开练，或在曲库里把一段加入今天。</p><Link href="/library" className="btn btn-soft mt-4">去曲库挑一段</Link></div>}
         <div className="mt-4 flex items-center gap-3 rounded-2xl bg-good-soft px-5 py-4 text-[13px] text-good"><Icon name="clock" /><span>今天已练 {formatDuration(data.todayMinutes)}{data.totalCount > 0 ? ` · 已完成 ${data.doneCount}/${data.totalCount} 段` : ""}</span></div>
-        {suggestions.length > 0 ? <section className="mt-7"><SectionTitle action={<Link href="/library" className="btn btn-sm btn-ghost">全部曲目 →</Link>}>也可以练这些</SectionTitle><div className="mt-3 space-y-3">{suggestions.map(s => <QuickBlock key={s.blockId} data={s} />)}</div></section> : null}
+        {suggestions.length > 0 ? <section className="mt-7"><SectionTitle action={<Link href="/library?album=all" className="btn btn-sm btn-ghost">全部曲目 →</Link>}>也可以练这些</SectionTitle><div className="mt-3 space-y-3">{suggestions.map(s => <QuickBlock key={s.blockId} data={s} />)}</div></section> : null}
       </div>
       <aside className="card rhythm-card">
         <h2 className="text-[17px] font-bold">把练习，变成自己的节奏</h2>
@@ -77,5 +77,5 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   </div>;
 }
 function QuickBlock({ data }: { data: TaskCardData }) {
-  return <div className="card task-card"><div className="task-body"><span className="task-icon"><Icon name="music" /></span><div className="task-copy"><h3>{data.blockName}</h3><p>{data.songTitle} · 第 {data.barStart}–{data.barEnd} 小节</p><p>建议起手 {data.recommendedStartBpm} BPM · 目标 {data.targetBpm} BPM</p></div><div className="task-actions"><Link href={`/practice/${data.blockId}`} className="btn btn-soft">开始练习</Link></div></div></div>;
+  return <div className="card task-card"><div className="task-body"><span className="task-icon"><Icon name="music" /></span><div className="task-copy"><h3>{data.blockName}</h3><p>{data.songTitle} · {data.isWholeSong ? "整曲练习" : `第 ${data.barStart}–${data.barEnd} 小节`}</p><p>建议起手 {data.recommendedStartBpm} BPM · 目标 {data.targetBpm} BPM</p></div><div className="task-actions"><Link href={`/practice/${data.blockId}`} className="btn btn-soft">开始练习</Link></div></div></div>;
 }

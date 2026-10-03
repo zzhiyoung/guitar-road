@@ -11,6 +11,7 @@ import {
 import type {
   OmrRecognizeResult,
   OmrStatus,
+  OmrInputMode,
 } from "./types";
 
 /**
@@ -49,6 +50,7 @@ function run(
       windowsHide: true,
       // 不经过 shell：args 原样传给可执行文件
       shell: false,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8", PYTHONUTF8: "1" },
     });
 
     let stdout = "";
@@ -181,6 +183,7 @@ export async function recognizeScoreImage(input: {
   bytes: Buffer;
   fileName: string;
   mime: string;
+  mode?: OmrInputMode;
 }): Promise<OmrRecognizeResult> {
   if (input.bytes.byteLength === 0) {
     return { ok: false, error: "图片内容为空" };
@@ -219,7 +222,9 @@ export async function recognizeScoreImage(input: {
           "--output",
           outputPath,
           "--timeout",
-          String(Math.floor(OMR_TIMEOUT_MS / 1000)),
+          String(Math.floor(OMR_TIMEOUT_MS / 1000) - 10),
+          "--mode",
+          input.mode ?? "auto",
         ],
         { cwd: omrToolDir(), timeoutMs: OMR_TIMEOUT_MS + 5_000 },
       );
@@ -244,9 +249,12 @@ export async function recognizeScoreImage(input: {
       | null;
 
     if (!payload || payload.ok !== true || result.code !== 0) {
+      console.error("[creator-omr] recognition failed", result.stderr.slice(-3000));
       return {
         ok: false,
-        error: payload?.error ?? "识别失败，请换一张更清晰的乐谱截图",
+        error: payload?.error && !/[A-Za-z]:[\\/]|\/tmp\/|Traceback/i.test(payload.error)
+          ? payload.error
+          : "识别失败，请换一张更清晰的乐谱截图；详细错误已保留在服务日志。",
       };
     }
 
@@ -267,8 +275,10 @@ export async function recognizeScoreImage(input: {
     return {
       ok: true,
       musicXml,
-      engine: payload.engine ?? "unknown",
-      warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+      engine: typeof payload.engine === "string" ? payload.engine : "unknown",
+      warnings: Array.isArray(payload.warnings)
+        ? payload.warnings.filter((warning): warning is string => typeof warning === "string")
+        : [],
       downloadName: recognizedFileName(input.fileName),
     };
   } finally {

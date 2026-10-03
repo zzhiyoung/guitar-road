@@ -7,6 +7,11 @@ import { scoreFiles } from "@/lib/db/schema";
 export type ScoreFile = typeof scoreFiles.$inferSelect;
 export type ScoreFileKind = ScoreFile["fileType"];
 
+/** Versions are per format; compare upload times across GP and MusicXML. */
+export function latestScoreFirst(a: ScoreFile, b: ScoreFile): number {
+  return b.createdAt.getTime() - a.createdAt.getTime() || b.version - a.version;
+}
+
 export async function listScoreFiles(songId: string): Promise<ScoreFile[]> {
   const db = getDb();
   return db
@@ -44,7 +49,7 @@ export async function getLatestScoreFile(
 }
 
 /**
- * 批量取多个 Song 的「可播放」文件（GP / MusicXML，取 version 最大的一个）。
+ * 批量取多个 Song 的最新上传的「可播放」文件（GP / MusicXML）。
  * 供 Library 列表判断哪些卡片可以显示「▶ 播放」入口。
  */
 export async function listPlayableBySongs(
@@ -66,7 +71,7 @@ export async function listPlayableBySongs(
 
   for (const row of rows) {
     const current = result.get(row.songId);
-    if (!current || row.version > current.version) result.set(row.songId, row);
+    if (!current || latestScoreFirst(row, current) < 0) result.set(row.songId, row);
   }
   return result;
 }
@@ -100,6 +105,7 @@ export async function createScoreFile(input: {
       storagePath: input.storagePath,
       trackIndex: input.trackIndex ?? 0,
       version: nextVersion,
+      createdAt: new Date(),
     })
     .returning();
   return row;

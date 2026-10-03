@@ -1,6 +1,8 @@
 # Guitar Road OMR sidecar
 
-把乐谱截图识别成 MusicXML，供 **Guitar Road Creator** 预览与下载。
+把乐谱截图识别成 MusicXML 草稿，供 **Guitar Road Creator** 预览与下载。
+
+> **Creator 整体是实验测试功能。** 仅验证了有限样本，尚未完成真实乐谱泛化与设备验收，不保证音高、节奏、弦号或品位的准确性。请用 Guitar Pro 人工校对后再导入曲库；此状态适用于所有识别模式。
 
 > **这是可选能力。** Guitar Road 主程序（Next.js）只依赖 Node.js。
 > 没有 Python / homr / PyTorch 时，`npm install && npm run build && npm run start`
@@ -279,8 +281,9 @@ homr 的 CLI 只接受一个位置参数（图片或目录），产物固定写�
 | 输出 | 14.8 KB MusicXML，10 小节 / 51 个音高音符 |
 | 结论 | 五线谱部分可用作草稿 |
 
-**homr 只读五线谱，不读 TAB。** 截图里同时有五线谱和 TAB 时，TAB 会被忽略 —— 这与
-SPEC 的定位一致：识别出的是草稿，指法与把位仍需在 Guitar Pro 里补。
+**现有 homr 接入不具备 TAB 弦号/品位识别能力。** 五线谱与 TAB 混排时，TAB 还可能被
+误识别为额外声部，不能假定它会被安全忽略。当前 Creator 的识别结果仍是草稿。
+这是早期 homr 全图路径的实测。当前 Creator 默认自动模式先隔离组合谱，实验性 TAB 融合见下节；不可靠的对齐会明确失败。
 
 homr 会在输入图片旁边生成 `<名字>_teaser.png` 可视化图；`tools/omr` 的适配器只在
 受控临时目录里运行，Node 层任务结束后整目录清理，不会污染用户目录。
@@ -293,3 +296,82 @@ homr 会在输入图片旁边生成 `<名字>_teaser.png` 可视化图；`tools/
 - homr 主要覆盖高低音谱号的音高与节奏；力度、演奏法、重升重降等可能丢失。
 
 官方仓库与许可证：<https://github.com/liebharc/homr>
+
+## 8. 实验性 TAB 工具与 Creator 集成（2026-10-02）
+
+Creator 已提供自动、五线谱＋TAB、仅五线谱三种模式，并支持谱表切换、试听/暂停/停止、下载及逐条质量警告。组合谱使用同一 Python 环境中的 **homr 0.7.0** 和可选 RapidOCR 3.9.2；数字模型必须放在该环境 `rapidocr/models` 下，文件名见下文。`uvx` 单独提供的 homr 仍可用于旧 CLI 全图路径，但不足以运行此组合谱适配器。
+
+下载使用无状态 HTTP 附件接口，支持中文文件名；识别稿从客户端直接提交用于导出，不保存到数据库或曲库。原创四音小样本的浏览器落盘检查已通过。
+
+```powershell
+# 在独立 venv 中准备可选依赖，不涉及 Node 核心应用
+.venv/Scripts/python -m pip install -e '.[homr,tab]'
+.venv/Scripts/python -m guitar_road_omr recognize sample.png `
+  --mode standard-tab --output C:/tmp/my-omr-check/draft.musicxml
+```
+
+`recognize --mode auto|standard-tab|standard` 是新 pipeline；不传 `--mode` 时保留旧 CLI 行为。默认 API 使用 auto。所有位置和事件须在同一系统、小节内通过唯一横向匹配与时值完整性检查；未知数字、额外拍号候选、数量不一致或不支持的和弦/倚音/连音/延音会拒绝合并。支持标准 EADGBE、无变调夹的清晰单音组合谱，其他奏法/文字指法不保留；纯 TAB 不支持。五线谱与 TAB 音高冲突时草稿采用 TAB，并展示待核对信息。结果是单吉他声部，避免重复播放。
+
+“仅五线谱”对组合谱先隔离六线谱；没有原 TAB 技术标记。识别结果、拍号、时值和速度均需用户校对。Node 限制单次识别时间，子进程在剩余时限内退出；检查状态不会下载数字模型。
+
+新增的 `inspect-tab` 是独立 CLI：自动定位印刷体五线谱/六线谱组合，输出 TAB 的弦号、
+品位、位置和待核对事件，并可保留诊断图。它**不提供节奏、不生成 MusicXML、不写数据库**。
+现有 `status` 和不带 `--mode` 的 `recognize` 维持旧 CLI 行为；Creator 默认入口使用新模式。
+
+依赖全部可选。原型验证环境为 Python 3.12、RapidOCR 3.9.2、CPU ONNX Runtime；
+`pip install -e '.[tab]'` 是新建独立测试环境时的可选安装项，本轮没有安装或升级主环境依赖。
+原型使用已有本地模型，不会在检查过程中自动下载模型。通过 `--models` 指向包含以下文件的目录：
+
+- `PP-OCRv6_det_small.onnx`
+- `PP-OCRv6_rec_small.onnx`
+- `ch_ppocr_mobile_v2.0_cls_mobile.onnx`
+
+```powershell
+# 在 tools/omr 中执行，路径用自己的独立本地目录
+.venv/Scripts/python -m guitar_road_omr inspect-tab sample.png `
+  --output C:/tmp/my-omr-check/tab.json `
+  --models C:/tmp/my-omr-models `
+  --diagnostics C:/tmp/my-omr-check/diagnostics
+```
+
+stdout 最后一行是 JSON，带 `experimental: true`、事件数量、`needsReview` 和 warnings。
+`ok: true` 表示检查命令完成，不代表 TAB 或草稿已验收。JSON 记录每个事件的候选和来源；
+冲突或未知数字不补成 0 品。OCR 分数不是校准后的正确率。
+
+当前仅验证了三张同类教材片段的 48 个弦号/品位事件，与先前的人工候选标注一致。
+小节归属各为 8+8 个事件；未做独立教材泛化评测或用户独立复核。
+本轮字形检查改进后，Arial、Times 与 Segoe UI 各为 16/16，旧教材基线仍为 48/48。
+新增扫描图的 24 个音乐事件可读，但另有一个疑似 C 拍号的未知事件，因此完整样本未通过，P2 尚未验收。
+已参与调试的图片和字体不作为留出集成绩；详细记录见 [开发进展](../../docs/CREATOR_OMR_PROGRESS.md)。
+纯 TAB、无符干 TAB、和弦、特殊奏法、明显倾斜及过稀/密的谱线不在已验证范围。
+原型的谱线间距检测范围为 4–26 像素，最多 8 个系统、每系统 128 个候选事件。
+输入上限为 20 MB / 2000 万像素。
+工具尝试根据长谱线纠正小幅统一倾斜，不处理透视或页面弯曲。诊断图与 bbox/x 坐标均使用
+分析图坐标；JSON `image_geometry` 提供与原图的双向矩阵变换。原图不被覆盖。
+运行中会用最多两个 OCR CPU 线程；命令本身没有服务级超时，自动化调用时应由父进程限时。
+
+```powershell
+cd tools/omr
+.venv/Scripts/python -B -m unittest discover -s tests -v
+# 从项目根运行，验证当前 alphaTab 的原弦/品位、记谱八度和实际 MIDI 音符
+node tools/omr/tests/check_musicxml.mjs
+```
+
+可选真实 OCR 检查使用原创合成图和自己准备的本地字体文件，不打包字体或权重。
+从 `tools/omr` 执行，`PYTHONPATH` 指向该目录：
+
+```powershell
+$env:PYTHONPATH = (Get-Location).Path
+.venv/Scripts/python -B tests/check_ocr.py --models C:/tmp/my-omr-models `
+  --output C:/tmp/my-omr-check/fonts --font C:/Windows/Fonts/arial.ttf `
+  --font C:/Windows/Fonts/times.ttf --font C:/Windows/Fonts/segoeui.ttf
+```
+
+每个字体检查 16 个事件，漏检、未知、错弦/品位、小节错误或重复均不能算作通过。
+当前三种字体检查均通过；历史失败结果保留。新增字体或真实扫描图仍须独立检查，不能推定通过。
+
+`tests/fixtures/guitar-technical.musicxml` 是原创兼容性小样本，可用于 Guitar Pro 导入验收。
+alphaTab 模型和 MIDI 检查已通过；用户已确认该四音 fixture 的 Guitar Pro 8 检查可用。
+新识别文件的 Guitar Pro 导入及真实设备试听仍需用户验收。
+Creator 已对组合谱导入启用五线显示适配；浏览器显示切换和播放控件已检查，不能代替真实设备试听验收。
+真实教材图片、模型和识别输出不得放进 Git；诊断目录应放在独立本地目录。

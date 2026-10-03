@@ -42,6 +42,13 @@ export const MIGRATIONS: Migration[] = [
       `CREATE INDEX IF NOT EXISTS songs_album_idx ON songs (album_id)`,
     ],
   },
+  {
+    id: "0002_whole_song_practice",
+    statements: [
+      `ALTER TABLE practice_blocks ADD COLUMN is_whole_song INTEGER NOT NULL DEFAULT 0`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS blocks_whole_song_idx ON practice_blocks (user_id, song_id) WHERE is_whole_song = 1`,
+    ],
+  },
 ];
 
 const MIGRATION_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _migrations (

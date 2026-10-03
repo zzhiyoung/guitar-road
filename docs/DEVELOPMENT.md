@@ -47,7 +47,28 @@ assets/                 Windows 图标及其源 PNG
 
 整曲播放是**只读**体验：不创建 Practice Block、不写 Practice Session、不影响 BPM 进度与 Streak。
 
-### Creator 与 OMR sidecar
+### 主程序体验行为
+
+曲库首页为专辑卡片；`?album=<id>`、`?album=unfiled` 与 `?album=all` 分别为专辑内、未分类及全部列表。列表的整曲安排通过 `whole-song.ts` 事务复用可见整曲 Block，并对同日任务去重。增量迁移 `0002_whole_song_practice` 只增加类型列及部分唯一索引，旧记录不转换。整曲练习的范围随最新谱面动态读取。
+
+练习 MIDI 按书面顺序生成，谱内反复/跳转在生成时暂时关闭并恢复，音频范围在 MIDI 加载结束和播放前重设。小节 tick 使用真实时值累计（包含弱起），完整循环事件用于速度训练。普通整曲播放保留原谱的反复与跳转。
+
+预备拍由 `audio/count-in.ts` 按起播小节拍号与实际速度安排到 WebAudio 时钟；取消同时清理排队音符与异步解锁回调。原生 alphaTab 预备拍在精确的拍号变化边界会继承旧拍号，故未直接使用。页面计时草稿存于当前标签页的 sessionStorage，显式暂停与不可见时间不计入，Session 仍按整数分钟保存。
+
+播放器统一提供主音量滑杆，默认 150%，原谱的轨道与音符力度保持。音量及预备衔接需真实听音，不能以浏览器播放状态代替。当前交付与证据见 [UX_FEEDBACK.md](UX_FEEDBACK.md)。
+
+针对这些数据及播放边界的回归使用临时数据库和原创 MusicXML：
+
+```bash
+# 本轮验证使用 Node 24；测试命令不改变应用的 Node 22+ 要求
+node --experimental-transform-types scripts/check-ux.mjs
+```
+
+测试仅替换 Next 缓存失效调用，其余上传、仓储、迁移、存储及 alphaTab 合成器执行实际代码。测试输出临时目录，便于排查；不会读取或改写真实练习数据。
+
+### Creator 测试功能与 OMR sidecar
+
+Creator 整体为实验测试功能，仅覆盖有限样本，尚未完成真实乐谱泛化与设备验收。所有识别结果都须人工校对；页面可用、测试通过或引擎就绪不能视为识别质量已验收。
 
 Creator 通过 `spawn(python, [...])` 调用 `tools/omr`（**不经过 shell**，用户文件名不会拼进命令）。
 契约见 [tools/omr/README.md](../tools/omr/README.md)：stdout 最后一行是 JSON，退出码 `0` 成功、`2` 引擎缺失。

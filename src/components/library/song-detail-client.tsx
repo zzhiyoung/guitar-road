@@ -138,6 +138,7 @@ export function BlockEditForm({
     name: string;
     barStart: number;
     barEnd: number;
+    isWholeSong: boolean;
     currentBpm: number;
     targetBpm: number;
     note: string | null;
@@ -179,6 +180,7 @@ export function BlockEditForm({
           className="input"
           type="number"
           name="barStart"
+          disabled={block.isWholeSong}
           min={1}
           defaultValue={block.barStart}
         />
@@ -189,10 +191,12 @@ export function BlockEditForm({
           className="input"
           type="number"
           name="barEnd"
+          disabled={block.isWholeSong}
           min={1}
           defaultValue={block.barEnd}
         />
       </label>
+      {block.isWholeSong ? <p className="text-[12px] text-muted sm:col-span-3">整曲练习始终覆盖最新乐谱的全部小节；节选请另外创建段落。</p> : null}
       <label className="block">
         <span className="label">当前 BPM</span>
         <input

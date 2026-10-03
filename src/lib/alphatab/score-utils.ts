@@ -2,6 +2,24 @@ import type * as alphaTabNS from "@coderline/alphatab";
 
 type Score = alphaTabNS.model.Score;
 
+/** Practice follows written bar order; the practice loop owns all repetition.
+ * Restore notation immediately after synchronous MIDI generation. */
+export function withLinearPracticePlayback(score: Score, generate: () => void): void {
+  const originals = score.masterBars.map((bar) => ({ bar, repeatCount: bar.repeatCount,
+    alternateEndings: bar.alternateEndings, directions: bar.directions }));
+  const groups = new Map(score.masterBars.map((bar) => [bar.repeatGroup, bar.repeatGroup.isClosed]));
+  try {
+    for (const { bar } of originals) { bar.repeatCount = 0; bar.alternateEndings = 0; bar.directions = null; }
+    for (const group of groups.keys()) group.isClosed = false;
+    generate();
+  } finally {
+    for (const { bar, repeatCount, alternateEndings, directions } of originals) {
+      bar.repeatCount = repeatCount; bar.alternateEndings = alternateEndings; bar.directions = directions;
+    }
+    for (const [group, closed] of groups) group.isClosed = closed;
+  }
+}
+
 export interface BarTiming {
   /** 该小节起始 tick */
   startTick: number;
@@ -20,16 +38,18 @@ export interface BarTiming {
 export function barTimings(score: Score): BarTiming[] {
   const bars = score.masterBars;
   const out: BarTiming[] = [];
+  let startTick = 0;
   for (let i = 0; i < bars.length; i++) {
     const mb = bars[i];
-    const durationTicks = Math.max(1, mb.calculateDuration(false));
+    const durationTicks = Math.max(1, mb.calculateDuration());
     const beatsPerBar = Math.max(1, mb.timeSignatureNumerator);
     out.push({
-      startTick: mb.start,
+      startTick,
       durationTicks,
-      ticksPerBeat: durationTicks / beatsPerBar,
+      ticksPerBeat: 960 * 4 / Math.max(1, mb.timeSignatureDenominator),
       beatsPerBar,
     });
+    startTick += durationTicks;
   }
   return out;
 }
@@ -92,8 +112,8 @@ export interface ScoreSummary {
 export function summarizeScore(score: Score): ScoreSummary {
   const firstBar = score.masterBars[0];
   return {
-    title: score.title || "",
-    artist: score.artist || "",
+    title: (score.title || "").replace(/\u00a0/g, " ").trim(),
+    artist: (score.artist || score.music || score.words || "").replace(/\u00a0/g, " ").trim(),
     tempo: score.tempo > 0 ? score.tempo : 120,
     barCount: score.masterBars.length,
     tracks: score.tracks.map((track, index) => ({

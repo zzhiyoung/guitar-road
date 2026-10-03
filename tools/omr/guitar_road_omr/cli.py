@@ -71,7 +71,11 @@ def cmd_recognize(args: argparse.Namespace) -> int:
     output_path = Path(args.output)
 
     try:
-        result: RecognitionResult = engine.recognize(input_path, output_path)
+        if args.mode:
+            from .pipeline import recognize_paired
+            result = recognize_paired(engine, input_path, output_path, args.mode)
+        else:
+            result = engine.recognize(input_path, output_path)
     except OmrUnavailableError as exc:
         _emit({"ok": False, "error": str(exc)})
         return EXIT_UNAVAILABLE
@@ -88,6 +92,33 @@ def cmd_recognize(args: argparse.Namespace) -> int:
 
     _emit(result.to_json_dict())
     return EXIT_OK
+
+
+def cmd_inspect_tab(args: argparse.Namespace) -> int:
+    """Independent experimental tool; the existing recognition path is unchanged."""
+    try:
+        from .tab_parser import inspect_tab
+
+        input_path = Path(args.input).resolve()
+        output_path = Path(args.output).resolve()
+        if input_path == output_path or output_path.suffix.lower() != '.json':
+            raise OmrError('TAB 检查输出必须是独立的 .json 文件，不能覆盖原图。')
+        result = inspect_tab(input_path,
+                             models=Path(args.models) if args.models else None,
+                             diagnostic_dir=Path(args.diagnostics) if args.diagnostics else None)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
+        events = [event for system in result['systems'] for event in system['events']]
+        _emit({'ok': True, 'experimental': True, 'output': str(output_path),
+               'events': len(events), 'needsReview': sum(e['needs_review'] for e in events),
+               'warnings': result['warnings'], 'timingAvailable': False})
+        return EXIT_OK
+    except OmrUnavailableError as exc:
+        _emit({'ok': False, 'error': str(exc)})
+        return EXIT_UNAVAILABLE
+    except Exception as exc:
+        _emit({'ok': False, 'error': str(exc)})
+        return EXIT_ERROR
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -112,8 +143,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rec.add_argument("--engine", default="homr", choices=sorted(ENGINES))
     rec.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    rec.add_argument('--mode', choices=('auto', 'standard', 'standard-tab'),
+                     help='Creator 模式；不指定时保留旧 CLI 行为')
     _device_arg(rec)
     rec.set_defaults(func=cmd_recognize)
+
+    inspector = sub.add_parser('inspect-tab', help='实验性 TAB 检查：输出弦号/品位 JSON，不生成 MusicXML')
+    inspector.add_argument('input', help='五线谱 + TAB 图片路径')
+    inspector.add_argument('--output', required=True, help='独立 JSON 输出路径')
+    inspector.add_argument('--models', help='已下载 RapidOCR 模型的目录（不会自动下载）')
+    inspector.add_argument('--diagnostics', help='可选的独立本地诊断目录，保留裁剪图和数字框')
+    inspector.set_defaults(func=cmd_inspect_tab)
 
     return parser
 

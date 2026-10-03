@@ -30,7 +30,7 @@ export default async function PlaySongPage({
   const playable =
     [...scoreFiles]
       .filter((f) => f.fileType === "gp" || f.fileType === "musicxml")
-      .sort((a, b) => b.version - a.version)[0] ?? null;
+      .sort(scoreFilesRepo.latestScoreFirst)[0] ?? null;
 
   const storage = getStorage();
 
